@@ -14,17 +14,19 @@
 #define PORT 80 // vita userland programs can bind on < 1024 ports
 #include <sys/_timeval.h>
 #include <vitasdk.h>
+#include "debugScreen.h"
+#define printf  psvDebugScreenPrintf
 #endif
-
-#define HTTP_HDR(S,T) "HTTP/1.1 "S"\r\nContent-Type: " T "\r\n\r\n"
+/*
+#define PRINT_ENV() printf("url:'%s' path='%s'\n", url, path);\
+	for(int i = 0; headers[i]; i += 2)printf("[%s=%s]\n", headers[i], headers[i+1]);\
+	for(int i = 0; params [i]; i += 2)printf("(%s=%s)\n",  params[i], params[i+1]);\
+	for(int i = 0; data   [i]; i += 2)printf("{%s=%s}\n",    data[i], data[i+1]);
+*/
+#define HTTP_HDR(STATUS,TYPE) "HTTP/1.1 "STATUS"\r\nConnection: close\r\nContent-Type: "TYPE"\r\n\r\n"
 #define HTML_HDR HTTP_HDR("200", "text/html")"<!doctype html>\r\n<html>"
 #define $(val) val,(sizeof(val)/sizeof(*val))
 
-void  forward(int from, int to) {
-	char buf[1024];
-	for(int len;(len = read(from, buf, sizeof(buf))) > 0;)
-		write(to, buf, len);
-}
 void  sendall(int s, char*str[], size_t max) {
 	for(size_t i = 0; i < max; i++)
 		write(s, str[i], strlen(str[i]));
@@ -63,7 +65,7 @@ char*valueof(char**keyval, char*key) {
 	return "";
 }
 char*unescape(char*str) {
-	#define HATOI(C) (C>'9'?(C&7)+9:C-'0') /*convert a char to it Hex value (A=10)*/
+	#define HATOI(C) (C>'9'?(C&7)+9:C-'0') /*HexAscii to int ('A'=10)*/
 	for (int e=0,u=0;str[u];e++,u++)
 		if(str[e]=='%' && str[e+1] && str[e+2])
 			str[u] = HATOI(str[e+1]) << 4 | HATOI(str[e+2]),e+=2;
@@ -75,14 +77,15 @@ char*unescape(char*str) {
 
 #include "httpd.file.c"
 #include "httpd.module.c"
-/*TODO /app/ // VPK + PKG support*/
+#include "httpd.camera.c"
+
 struct{char*module,*export;void (*handler)(int,char*,char*,char**,char**,char**);} routes[64]= {
-	{"/file/","GET", file_get},
-	{"/file/","POST",file_post},
-	{"/module/","GET", module_get},
+	{"/file/",  "GET", file_get   },
+	{"/file/",  "POST",file_post  },
+	{"/module/","GET", module_get },
 	{"/module/","POST",module_post},
-//	{"/dev/","GET", dev_get},
-//	{"/dev/","POST",dev_post},
+	{"/camera/","GET", camera_get },
+	{"/camera/","POST",camera_post},
 };
 void route404(int s, char*url, char*path, char**hdr, char**par, char**formdata){
 	sendall(s, $(((char*[]){HTTP_HDR("404","text/plain"), url, " Not Found"})));
@@ -104,14 +107,17 @@ void route_list(int s){
 	sendall(s, $(((char*[]){"</ul></body></html>\n"})));
 }
 
-int main() {
+int main(int argc, char**argv) {
 #ifdef __vita__
+	psvDebugScreenInit();
+	printf("HTTP server: arg[%i]\n",argc);
+	//for(int i=0;i<argc;i++)printf("arg[%i]='%s'\n",i,argv[i]);
 	static char net_mem[1*1024*1024];
 	sceSysmoduleLoadModule(SCE_SYSMODULE_NET);
 	sceNetInit(&(SceNetInitParam){net_mem, sizeof(net_mem)});
 #endif
 	int out, in = socket(AF_INET, SOCK_STREAM, 0);
-	setsockopt(in, SOL_SOCKET, SO_REUSEPORT, &(int[]){1}, sizeof(int));
+	//setsockopt(in, SOL_SOCKET, SO_REUSEPORT, &(int[]){1}, sizeof(int));
 	bind(in, (struct sockaddr *) &((struct sockaddr_in){.sin_family=AF_INET,htons(PORT),{}}), sizeof(struct sockaddr_in));
 	listen(in,5);
 	while ((out=accept(in, NULL, NULL))>=0){
@@ -128,14 +134,13 @@ int main() {
 			int len = atoi(valueof(headers, "Content-Length"));
 			formdata = pair($((char*[256]){readlen(out, (char[4096]){},len>4096?4096:len)}),$("&"),$("="));
 		}
+		printf("%s\n",request);
 		if(strlen(request)<=1) // empty path
 			route_list(out);
 		else if(!strchr(request+1,'/')) // no terminating / for module
-			sendall(out, $(((char*[]){HTTP_HDR("301","text/plain") "Location: ",request, "/"})));
-		else{
-			fprintf(stderr,"req=%s\n",request);
+			sendall(out, $(((char*[]){"HTTP/1.1 301\r\nLocation: ",request, "/\r\n\r\n"})));
+		else
 			route(request, method)(out, request, strchr(request + 1, '/'), headers, params, formdata);
-		}
 		close(out);
 	}
 	close(in);

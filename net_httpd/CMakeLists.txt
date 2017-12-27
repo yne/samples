@@ -31,6 +31,7 @@ target_link_libraries(${SHORT_NAME}
   SceSysmodule_stub
   SceNet_stub
   SceNetCtl_stub
+  SceCamera_stub
 )
 
 vita_create_self(${SHORT_NAME}.self ${SHORT_NAME} UNSAFE)
