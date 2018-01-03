@@ -17,15 +17,10 @@
 #include "debugScreen.h"
 #define printf  psvDebugScreenPrintf
 #endif
-/*
-#define PRINT_ENV() printf("url:'%s' path='%s'\n", url, path);\
-	for(int i = 0; headers[i]; i += 2)printf("[%s=%s]\n", headers[i], headers[i+1]);\
-	for(int i = 0; params [i]; i += 2)printf("(%s=%s)\n",  params[i], params[i+1]);\
-	for(int i = 0; data   [i]; i += 2)printf("{%s=%s}\n",    data[i], data[i+1]);
-*/
+
 #define HTTP_HDR(STATUS,TYPE) "HTTP/1.1 "STATUS"\r\nConnection: close\r\nContent-Type: "TYPE"\r\n\r\n"
 #define HTML_HDR HTTP_HDR("200", "text/html")"<!doctype html>\r\n<html>"
-#define $(val) val,(sizeof(val)/sizeof(*val))
+#define $(val) val,sizeof(val)/sizeof(*val)
 
 void  sendall(int s, char*str[], size_t max) {
 	for(size_t i = 0; i < max; i++)
@@ -61,7 +56,7 @@ char**pair(char**out, size_t max, char*ksep, size_t ksiz, char*vsep, size_t vsiz
 char*valueof(char**keyval, char*key) {
 	for (size_t i = 0; keyval[i] ;i+=2)
 		if (!strcasecmp(keyval[i], key))
-			return keyval[i+1];
+			return keyval[i+1]?:"";
 	return "";
 }
 char*unescape(char*str) {
@@ -75,11 +70,14 @@ char*unescape(char*str) {
 	#undef HATOI
 }
 
+#include "httpd.tty.c"
 #include "httpd.file.c"
 #include "httpd.module.c"
 #include "httpd.camera.c"
 
 struct{char*module,*export;void (*handler)(int,char*,char*,char**,char**,char**);} routes[64]= {
+	{"/tty/",   "GET", tty_get    },
+	{"/tty/",   "POST",tty_post   },
 	{"/file/",  "GET", file_get   },
 	{"/file/",  "POST",file_post  },
 	{"/module/","GET", module_get },
@@ -117,7 +115,7 @@ int main(int argc, char**argv) {
 	sceNetInit(&(SceNetInitParam){net_mem, sizeof(net_mem)});
 #endif
 	int out, in = socket(AF_INET, SOCK_STREAM, 0);
-	//setsockopt(in, SOL_SOCKET, SO_REUSEPORT, &(int[]){1}, sizeof(int));
+	setsockopt(in, SOL_SOCKET, SO_REUSEPORT, &(int[]){1}, sizeof(int));
 	bind(in, (struct sockaddr *) &((struct sockaddr_in){.sin_family=AF_INET,htons(PORT),{}}), sizeof(struct sockaddr_in));
 	listen(in,5);
 	while ((out=accept(in, NULL, NULL))>=0){

@@ -1,12 +1,13 @@
-#ifdef __vita__//TODO find a common directory API
-#include "dirent.vita.h"
-#define IS_A_DIR(ent) SCE_S_ISDIR((ent)->d_stat.st_mode)
-#define PATH_SHIFT 1
-#define ftruncate(A,B) 
-#else
 #include <dirent.h>
-#define IS_A_DIR(ent) ((ent)->d_type&DT_DIR)
-#define PATH_SHIFT 0
+#define PATH_SHIFT 0 // no path shifting: /file/ex will open(/ex)
+#define ENT_IS_A_DIR(ent) ((ent)->d_type&DT_DIR) // hide dirent.d_type/SceIoDirent.d_stat delta
+
+#ifdef __vita__
+#undef  ENT_IS_A_DIR
+#define ENT_IS_A_DIR(ent) SCE_S_ISDIR((ent)->d_stat.st_mode) //d_type does not exist
+#undef  PATH_SHIFT  // PSV does not have a '/' folder, so path shifting is needed
+#define PATH_SHIFT 1// with path shifting, /file/ex will open(ex)
+#define ftruncate(A,B) // no ftruncate syscall available
 #endif
 
 void file_get(int s, char*url, char*path, char**headers, char**params, char**data) {
@@ -34,7 +35,7 @@ void file_get(int s, char*url, char*path, char**headers, char**params, char**dat
 		"<form method=post><ul>\n"})));
 		for(struct dirent*ent;(ent = readdir(dirp));)
 			if(ent->d_name[0]!='.')
-				sendall(s, $(((char*[]){ "<li><input type=radio name=file value=\"",ent->d_name,"\"><a href=\"",ent->d_name,IS_A_DIR(ent)?"/":"","\">",ent->d_name,IS_A_DIR(ent)?"/":"","</a>","</li>\n"})));
+				sendall(s, $(((char*[]){ "<li><input type=radio name=file value=\"",ent->d_name,"\"><a href=\"",ent->d_name,ENT_IS_A_DIR(ent)?"/":"","\">",ent->d_name,ENT_IS_A_DIR(ent)?"/":"","</a>","</li>\n"})));
 		sendall(s, $(((char*[]){ "</ul><input type=submit name=action value=Remove></form></html>"})));
 	}
 	if(dirp)closedir(dirp);
@@ -52,6 +53,7 @@ void file_post(int s, char*url, char*path, char**headers, char**params, char**da
 			int n, fd = open(fpath, O_RDWR | O_CREAT | O_TRUNC, 0666);//O_RDWR is not RDONLY|WRONLY !
 			while ((n = read(s, $(buf))) > 0) {
 				write(fd, buf, n);
+				fprintf(stderr, "%i bytes written\n", n);
 				off_t eof = lseek(fd, -(bound_len+4), SEEK_END);//seek back to the (possibly written) delim
 				read(fd, buf, bound_len+4);// to read the last bytes + "--" + \r\n
 				if(!memcmp(buf+0, headers[0], bound_len)){//last file bytes are the delimiter
@@ -63,7 +65,7 @@ void file_post(int s, char*url, char*path, char**headers, char**params, char**da
 		}while(0);
 	} else {
 		sprintf(buf, "%s%s", path+1, unescape(valueof(data,"file")));
-		printf("remove(%s):%i",buf, sceIoRemove(buf));
+		printf("remove(%s):%i",buf, unlink(buf));
 	}
 	file_get(s, url, path, headers, params, data);
 }
