@@ -27,6 +27,9 @@ add_executable(${SHORT_NAME}
 )
 
 target_link_libraries(${SHORT_NAME}
+  m
+  SceCtrl_stub
+  SceAudio_stub 
   SceDisplay_stub
   SceSysmodule_stub
   SceNet_stub

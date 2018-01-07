@@ -37,6 +37,7 @@ static uint32_t defaultBg = 0xFF000000, colorBg = 0xFF000000;
 #include <psp2/display.h>
 #include <psp2/kernel/sysmem.h>
 #include <psp2/kernel/threadmgr.h>
+#define vsnprintf sceClibVsnprintf // direct vsnprintf call from suprx = crash
 static void* base; // pointer to frame buffer
 #else
 #define sceKernelLockMutex(m,v,x) m=v
@@ -74,7 +75,7 @@ static size_t psvDebugScreenEscape(const unsigned char *str) {
 		case 'm':// Color
 			if(!arg[0]) {arg[0] = 39;arg[1] = 49;argc = 1;}//no/0 args == reset BG + FG
 			for(unsigned c = 0; c <= argc; c++) {
-				uint32_t unit = arg[c] % 10, mode = arg[c] / 10, *color = mode&1 ? &colorFg : &colorBg;
+				uint32_t unit = arg[c] /*% 10*/, mode = arg[c] / 10, *color = mode&1 ? &colorFg : &colorBg;
 				if (unit == 9){ // reset FG or BG
 					*color = mode&1 ? defaultFg : defaultBg;
 				} else if ((unit==8) && (arg[c+1]==5)) { // 8bit : [0-15][16-231][232-256] color map
@@ -106,7 +107,7 @@ int psvDebugScreenPuts(const char * _text) {
 	for (c = 0; text[c] ; c++) {
 		unsigned char t = text[c];
 		if (t == '\t') {
-			coordX += SCREEN_TAB_W - coordX % SCREEN_TAB_W;
+			//coordX += SCREEN_TAB_W - coordX % SCREEN_TAB_W;
 			continue;
 		}
 		if (coordX + F.width > SCREEN_WIDTH) {
@@ -151,7 +152,7 @@ int psvDebugScreenPuts(const char * _text) {
 
 __attribute__((__format__ (__printf__, 1, 2)))
 int psvDebugScreenPrintf(const char *format, ...) {
-	char buf[4096];
+	char buf[512];
 
 	va_list opt;
 	va_start(opt, format);

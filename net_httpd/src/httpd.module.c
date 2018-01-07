@@ -1,21 +1,17 @@
-#ifndef __vita__
-#define sceKernelLoadModule(       path,             flags, opt        ) printf("Load"    " %s "       "%i\n", path,          flags);
-#define sceKernelLoadStartModule(  path, args, argp, flags, opt, status) printf("LoadStart  %s ""'%.*s' %i\n", path,args,argp,flags);
-#define sceKernelStartModule(     modid, args, argp, flags, opt, status) printf(     "Start %08X '%.*s' %i\n",modid,args,argp,flags);
-#define sceKernelStopModule(      modid, args, argp, flags, opt, status) printf("Stop"    " %08X '%.*s' %i\n",modid,args,argp,flags);
-#define sceKernelUnloadModule(    modid,             flags, opt        ) printf(    "Unload %08X "     "%i\n",modid,          flags);
-#define sceKernelStopUnloadModule(modid, args, argp, flags, opt, status) printf("StopUnload %08X '%.*s' %i\n",modid,args,argp,flags);
-#endif
-
-void module_get(int s, char*url, char*path, char**headers, char**params, char**data) {
-	int h = !!strstr(valueof(headers, "Accept"), "html");
+void module_get(int s, Request req) {
+	int h = !!strstr(valueof(req.headers, "Accept"), "html");
 	if(h)sendall(s, $(((char*[]){HTML_HDR,
-	"<form method=post>"
-		"<input type=submit name=action value=Load>"
-		"<input type=submit name=action value=LoadStart>"
-		"<input name=path placeholder='ux0:example.self'>"
-	"</form>"
-	"<h1>Module List:</h1><form method=post><pre>"})));
+	"<pre>", valueof(req.params,"message"), "</pre>",
+	"<h1>Module List:</h1><form method=post>"
+		"<input name=action type=submit value=Load>"
+		"<input name=action type=submit value=LoadStart>"
+		"<input name=path   placeholder=path>"
+		"<input name=action type=submit value=Start>"
+		"<input name=args   placeholder=args>"
+		"<input name=action type=submit value=Stop>"
+		"<input name=action type=submit value=Unload>"
+		"<input name=action type=submit value=StopUnload>"
+	"<pre>"})));
 	else sendall(s, $(((char*[]){ HTTP_HDR("200","text/plain") })));
 
 	#define FMT_HTML "<input type=radio name=modid value=0x%08lX>0x%08lX %08lX %-16s <a href=\"/file/%s\">%s</a>\n"
@@ -37,34 +33,36 @@ void module_get(int s, char*url, char*path, char**headers, char**params, char**d
 		sendall(s, $(((char*[]){line})));
 	}
 #endif
-	if(h)sendall(s, $(((char*[]){
-		"<input type=submit name=action value=Start>",
-		"<input type=submit name=action value=Stop>",
-		"<input type=submit name=action value=Unload>",
-		"<input type=submit name=action value=StopUnload>",
-		"</pre></form>"})));
+	if(h)sendall(s, $(((char*[]){"</pre></form>"})));
 } 
-void module_post(int s, char*url, char*path, char**headers, char**params, char**data){
+void module_post(int s, Request req){ 
 	int ret = -1, status = 0;
-	char*action = valueof(data,"action");
-	int modid = strtol(valueof(data,"modid")?:"0",NULL,0);
-	int flags = strtol(valueof(data,"flags")?:"0",NULL,0);
-	char*args = unescape(valueof(data,"args"));
-	int argsz = strlen(args);
-	char*fpath = unescape(valueof(data,"path"));
-	if(!strcasecmp(action,"Load"      ))ret = sceKernelLoadModule      (fpath,              flags, NULL         );
-	if(!strcasecmp(action,"LoadStart" ))ret = sceKernelLoadStartModule (fpath, argsz, args, flags, NULL, &status);
-	if(!strcasecmp(action,"Start"     ))ret = sceKernelStartModule     (modid, argsz, args, flags, NULL, &status);
-	if(!strcasecmp(action,"Stop"      ))ret = sceKernelStopModule      (modid, argsz, args, flags, NULL, &status);
-	if(!strcasecmp(action,"Unload"    ))ret = sceKernelUnloadModule    (modid,              flags, NULL         );
-	if(!strcasecmp(action,"StopUnload"))ret = sceKernelStopUnloadModule(modid, argsz, args, flags, NULL, &status);
+	char*action = valueof(req.formdata,"action");
+	int modid = strtol(valueof(req.formdata,"modid")?:"0",NULL,0);
+	int flags = strtol(valueof(req.formdata,"flags")?:"0x01010000",NULL,0);
+	char*fpath = unescape(valueof(req.formdata,"path"));
+	char*argp = unescape(valueof(req.formdata,"args"));
+	int  args = strlen(argp)+1;// args must include the NUL delimiter
+	debug("%s 0x%08X %s (%.*s) [%08X]\n", action, modid, fpath, args, argp, flags);
+	#ifdef __vita__
+	if(!strcasecmp(action,"Load"      ))ret = sceKernelLoadModule      (fpath,             flags, NULL         );
+	if(!strcasecmp(action,"LoadStart" ))ret = sceKernelLoadStartModule (fpath, args, argp, flags, NULL, &status);
+	if(!strcasecmp(action,"Start"     ))ret = sceKernelStartModule     (modid, args, argp, flags, NULL, &status);
+	if(!strcasecmp(action,"Stop"      ))ret = sceKernelStopModule      (modid, args, argp, flags, NULL, &status);
+	if(!strcasecmp(action,"Unload"    ))ret = sceKernelUnloadModule    (modid,             flags, NULL         );
+	if(!strcasecmp(action,"StopUnload"))ret = sceKernelStopUnloadModule(modid, args, argp, flags, NULL, &status);
+	#endif
+	debug("ret=0x%08X\n", ret);
 	char head[1024],body[1024];
 	if(ret < 0) {
 		snprintf(head, sizeof(head), HTTP_HDR("500 0x%08X","text/plain") , ret);
-		snprintf(body, sizeof(body), "Failed to %s 0x%08X %s: 0x%08X", action, modid, fpath, ret);
+		snprintf(body, sizeof(body), "Failed to %s %#.x%s args(%.*s) [%08X]: 0x%08X", action, modid, fpath, args, argp, flags, ret);
 	} else {
 		snprintf(head, sizeof(head), HTTP_HDR("200 %i","text/plain"), status);
-		snprintf(body, sizeof(body), "0x%08X", ret);
+		snprintf(body, sizeof(body), "0x%08X", ret?:status);//return the PID or the module_{start/stop} result
 	}
-	sendall(s, $(((char*[]){head,body})));
+	int h = !!strstr(valueof(req.headers, "Accept"), "html");
+	req.params = (char*[]){"message",body,NULL};
+	if(h)module_get(s, req);
+	else sendall(s, $(((char*[]){head,body})));
 }

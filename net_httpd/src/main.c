@@ -7,17 +7,19 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <pthread.h>
 #define PORT 8080
+#define debug printf
 
 #ifdef __vita__
-#undef  PORT
-#define PORT 80 // vita userland programs can bind on < 1024 ports
-#include <sys/_timeval.h>
+#undef  PORT    // vita userland programs can bind on < 1024 ports
+#define PORT 80 // let's simply use the HTTP port
 #include <vitasdk.h>
 #include "debugScreen.h"
 #define printf  psvDebugScreenPrintf
+#define rmdir   sceIoRmdir
+#define pthread_create(thid, opt, func, argp) sceKernelStartThread(sceKernelCreateThread(__func__,func##_vita,0x10000100,0x10000,0,0,NULL), sizeof(argp), argp)
 #endif
-
 
 #include "utils.c"
 #include "httpd.file.c"
@@ -25,7 +27,7 @@
 #include "httpd.camera.c"
 #include "httpd.tty.c"
 
-struct{char*module,*export;void (*handler)(int,char*,char*,char**,char**,char**);} routes[64]= {
+struct{char*module,*export;void (*handler)(int,Request);} routes[64]= {
 	{"/file/",  "GET", file_get   },
 	{"/file/",  "POST",file_post  },
 	{"/module/","GET", module_get },
@@ -35,67 +37,73 @@ struct{char*module,*export;void (*handler)(int,char*,char*,char**,char**,char**)
 	{"/tty/",   "GET", tty_get    },
 	{"/tty/",   "POST",tty_post   },
 };
-void route404(int s, char*url, char*path, char**hdr, char**par, char**formdata){
-	sendall(s, $(((char*[]){HTTP_HDR("404","text/plain"), url, " Not Found"})));
+void route404(int s, Request req){
+	sendall(s, $(((char*[]){HTTP_HDR("404","text/plain"), req.url, " Not Found"})));
 }
-void (*route(char*module,char*meth))(int s, char*url, char*path, char**headers, char**params, char**formdata){
-	for(int i=0;routes[i].module;i++)
-		if(!memcmp(module,routes[i].module,strlen(routes[i].module)) && !strcmp(meth,routes[i].export))
+void add_slash(int s, Request req){
+	sendall(s, $(((char*[]){"HTTP/1.1 301\r\nLocation: ",req.url, "/\r\n\r\n"})));
+}
+void route_list(int s, Request req){
+	/* TODO: dynamic fetch of all running modules that have the 'http_$meth' export and print them */
+	int h = !!strstr(valueof(req.headers, "Accept"), "html");
+	sendall(s, $(((char*[]){ h ? HTML_HDR "<body><ul>" : HTTP_HDR("200","text/plain")})));
+	for (int i = 0; routes[i].module; i++) {
+		char* tag = strcmp("GET",routes[i].export) ? "u" : "a";
+		if(h)sendall(s, $(((char*[]){"<li><",tag," href='",routes[i].module,"'>", routes[i].module,"</",tag,"> <kbd>",routes[i].export,"</kbd></li>\n"})));
+		else sendall(s, $(((char*[]){routes[i].module," ",routes[i].export,"\n"})));
+	}
+	if(h)sendall(s, $(((char*[]){"</ul></body></html>\n"})));
+}
+void (*route(char*url, char*meth))(int s, Request req){
+	if(strlen(url) <= 1) // empty path
+		return route_list;
+	if(!strchr(url + 1,'/')) // no terminating / for module
+		return add_slash;
+	for(int i = 0; routes[i].module; i++)
+		if(!memcmp(url,routes[i].module,strlen(routes[i].module)) && !strcmp(meth,routes[i].export))
 			return routes[i].handler;/* return the $module that have the 'http_$meth' export*/
 	return route404;
 }
-void route_list(int s){
-	//consume(s);
-	/* TODO: dynamic fetch of all running modules that have the 'http_$meth' export and print them */
-	sendall(s, $(((char*[]){HTML_HDR "<body><ul>"})));
-	for(int i=0;routes[i].module;i++){
-		char* tag = strcmp("GET",routes[i].export)?"u":"a";
-		sendall(s, $(((char*[]){"<li><",tag," href='",routes[i].module,"'>", routes[i].module,"</",tag,"> <kbd>",routes[i].export,"</kbd></li>\n"})));
-	}
-	sendall(s, $(((char*[]){"</ul></body></html>\n"})));
+void* requestHandler(void*arg){
+	int out=*(int*)arg;
+	//setsockopt(out, SOL_SOCKET, SO_RCVTIMEO, &(struct timeval){0,100*1000}, sizeof(struct timeval));
+	Request req = {};
+	req.method  = readsep(out, $((char[  16]){}), $(" "));
+	req.url     = readsep(out, $((char[4096]){}), $(" "));
+	req.version = readsep(out, $((char[  10]){}), $("\r\n"));
+	req.path    = strchr(req.url + !!*req.url, '/');
+	char*header = readsep(out, $((char[4096]){}), $("\r\n\r\n"));
+	req.headers = pair($((char*[64]){header}),$("\r\n"),$(": "));
+	char*param  = memset(strchr(req.url,'?')?:(char[]){'?',0},0,1)+1;
+	req.params  = pair($((char*[64]){param}),$("&"),$("="));
+	req.formdata= strcmp(valueof(req.headers, "Content-Type"), "application/x-www-form-urlencoded")?(char*[256]){}:
+		            pair($((char*[256]){readlen(out, (char[4096]){},atoi(valueof(req.headers, "Content-Length")))}),$("&"),$("="));
+	route(req.url, req.method)(out, req);
+	return close(out)?NULL:NULL;
 }
+int requestHandler_vita(unsigned args, void*argp){return requestHandler(args?argp:NULL)!=NULL;}
 
-int main(int argc, char**argv) {
+
+int main(int argc, char*argv[]) {
 #ifdef __vita__
-	psvDebugScreenInit();
-	printf("HTTP server: arg[%i]\n",argc);
-	//for(int i=0;i<argc;i++)printf("arg[%i]='%s'\n",i,argv[i]);
+	psvDebugScreenPrintf("argc:%i argv:%p *argv:%p\n",argc,argv,argv?*argv:NULL);
+	
+	//printf("arg[%i] argv:%i argv0:%i argv00:%i\n",argc,argv,argv[0],argv[0][0]);
+	//for(int i=0;i<argc;i++)printf("arg %i>'%s'@%p [%i]\n",i,argv[i],argv[i],strlen(argv[i]));
 	static char net_mem[1*1024*1024];
 	sceSysmoduleLoadModule(SCE_SYSMODULE_NET);
 	sceNetInit(&(SceNetInitParam){net_mem, sizeof(net_mem)});
 #endif
-	int out, in = socket(AF_INET, SOCK_STREAM, 0);
+	int out, in = socket(AF_INET, SOCK_STREAM, 0), port = argc>1?atoi(argv[1]):PORT;
 	setsockopt(in, SOL_SOCKET, SO_REUSEPORT, &(int[]){1}, sizeof(int));
-	bind(in, (struct sockaddr *) &((struct sockaddr_in){.sin_family=AF_INET,htons(PORT),{}}), sizeof(struct sockaddr_in));
+	bind(in, (struct sockaddr *) &((struct sockaddr_in){.sin_family=AF_INET,htons(port),{}}), sizeof(struct sockaddr_in));
 	listen(in,5);
-	while ((out=accept(in, NULL, NULL))>=0){
-		//setsockopt(out, SOL_SOCKET, SO_RCVTIMEO, &(struct timeval){0,100*1000}, sizeof(struct timeval));
-		char* method  = readsep(out, $((char[  16]){}), $(" "));
-		char* request = readsep(out, $((char[4096]){}), $(" "));
-		/* version = */ readsep(out, $((char[  10]){}), $("\r\n"));
-		char* header  = readsep(out, $((char[4096]){}), $("\r\n\r\n"));
-		char**headers = pair($((char*[64]){header}),$("\r\n"),$(": "));
-		char* param   = memset(strchr(request,'?')?:(char[]){'?',0},0,1)+1;
-		char**params  = pair($((char*[64]){param}),$("&"),$("="));
-		char**formdata= (char*[256]){};
-		if(!strcmp(valueof(headers, "Content-Type"), "application/x-www-form-urlencoded")){
-			int len = atoi(valueof(headers, "Content-Length"));
-			formdata = pair($((char*[256]){readlen(out, (char[4096]){},len>4096?4096:len)}),$("&"),$("="));
-		}
-		printf("%s\n",request);
-		if(strlen(request)<=1) // empty path
-			route_list(out);
-		else if(!strchr(request+1,'/')) // no terminating / for module
-			sendall(out, $(((char*[]){"HTTP/1.1 301\r\nLocation: ",request, "/\r\n\r\n"})));
-		else
-			route(request, method)(out, request, strchr(request + 1, '/'), headers, params, formdata);
-		close(out);
-	}
+	while ((out=accept(in, NULL, NULL)) >= 0)
+		pthread_create(&(pthread_t){0}, NULL, requestHandler, &out);
 	close(in);
 #ifdef __vita__
 	sceNetTerm();
 	sceSysmoduleUnloadModule(SCE_SYSMODULE_NET);
-	sceKernelDelayThread(~0);
 #endif
 	return 0;
 }
