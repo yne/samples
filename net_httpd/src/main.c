@@ -18,72 +18,22 @@
 #define printf  psvDebugScreenPrintf
 #endif
 
-#define HTTP_HDR(STATUS,TYPE) "HTTP/1.1 "STATUS"\r\nConnection: close\r\nContent-Type: "TYPE"\r\n\r\n"
-#define HTML_HDR HTTP_HDR("200", "text/html")"<!doctype html>\r\n<html>"
-#define $(val) val,sizeof(val)/sizeof(*val)
 
-void  sendall(int s, char*str[], size_t max) {
-	for(size_t i = 0; i < max; i++)
-		write(s, str[i], strlen(str[i]));
-}
-char* readlen(int s, char*buf, size_t len) {
-	int ret, pos=0;
-	while( (ret = read(s, buf + pos,len)) > 0) {
-		len -= ret;
-		pos += ret;
-	}
-	return buf;
-}
-char* readsep(int s, char*buf, ssize_t buf_max, char* delim, ssize_t delim_size) {delim_size--;
-	for(ssize_t i = 0; i < buf_max && read(s, buf + i, sizeof(*buf)) > 0; i++){
-		char*look = buf + i - delim_size + 1;
-		if((look >= buf) && !memcmp(look, delim, delim_size)){
-			memset(look,0,delim_size);
-			return buf;
-		}
-	}
-	return buf;
-}
-char**pair(char**out, size_t max, char*ksep, size_t ksiz, char*vsep, size_t vsiz) {vsiz--;ksiz--;
-	for (size_t i = 0; (i < max + 2) && out[i]; i += 2)
-		if ((out[i+2] = strstr(out[i]+1, ksep)))
-			out[i+2] = memset(out[i+2], 0, ksiz) + ksiz;
-	for (size_t i = 0; (i < max + 2) && out[i]; i += 2)
-		if ((out[i+1] = strstr(out[i]+1, vsep)))
-			out[i+1] = memset(out[i+1], 0, vsiz) + vsiz;
-	return out;
-}
-char*valueof(char**keyval, char*key) {
-	for (size_t i = 0; keyval[i] ;i+=2)
-		if (!strcasecmp(keyval[i], key))
-			return keyval[i+1]?:"";
-	return "";
-}
-char*unescape(char*str) {
-	#define HATOI(C) (C>'9'?(C&7)+9:C-'0') /*HexAscii to int ('A'=10)*/
-	for (int e=0,u=0;str[u];e++,u++)
-		if(str[e]=='%' && str[e+1] && str[e+2])
-			str[u] = HATOI(str[e+1]) << 4 | HATOI(str[e+2]),e+=2;
-		else
-			str[u] = str[e];
-	return str;
-	#undef HATOI
-}
-
-#include "httpd.tty.c"
+#include "utils.c"
 #include "httpd.file.c"
 #include "httpd.module.c"
 #include "httpd.camera.c"
+#include "httpd.tty.c"
 
 struct{char*module,*export;void (*handler)(int,char*,char*,char**,char**,char**);} routes[64]= {
-	{"/tty/",   "GET", tty_get    },
-	{"/tty/",   "POST",tty_post   },
 	{"/file/",  "GET", file_get   },
 	{"/file/",  "POST",file_post  },
 	{"/module/","GET", module_get },
 	{"/module/","POST",module_post},
 	{"/camera/","GET", camera_get },
 	{"/camera/","POST",camera_post},
+	{"/tty/",   "GET", tty_get    },
+	{"/tty/",   "POST",tty_post   },
 };
 void route404(int s, char*url, char*path, char**hdr, char**par, char**formdata){
 	sendall(s, $(((char*[]){HTTP_HDR("404","text/plain"), url, " Not Found"})));
@@ -100,7 +50,7 @@ void route_list(int s){
 	sendall(s, $(((char*[]){HTML_HDR "<body><ul>"})));
 	for(int i=0;routes[i].module;i++){
 		char* tag = strcmp("GET",routes[i].export)?"u":"a";
-		sendall(s, $(((char*[]){"<li><",tag," href='",routes[i].module,"'>", routes[i].module,"</",tag,"> <kbd>",routes[i].export,"</kbd></li>"})));
+		sendall(s, $(((char*[]){"<li><",tag," href='",routes[i].module,"'>", routes[i].module,"</",tag,"> <kbd>",routes[i].export,"</kbd></li>\n"})));
 	}
 	sendall(s, $(((char*[]){"</ul></body></html>\n"})));
 }

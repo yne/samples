@@ -12,12 +12,14 @@
 
 void file_get(int s, char*url, char*path, char**headers, char**params, char**data) {
 	DIR*dirp = opendir(path+PATH_SHIFT);
+	int h = !!strstr(valueof(headers, "Accept"), "html");
 	int fd = open(path+PATH_SHIFT, O_RDONLY);
 	#ifdef __vita__ // on vita "/" is the devices listing
 	if(path[0]=='/' && path[1]=='\0') {
 		char*dev[] = {"gro","grw","imc","os","pd","sa","tm","ud","uma","ur","ux","vd","vs","host"};
-		sendall(s, $(((char*[]){ HTML_HDR "<h1>Devices:</h1><ul>"})));
-		for(size_t i=0;i<sizeof(dev)/sizeof(*dev);i++)sendall(s, $(((char*[]){ "<li><a href=\"./",dev[i],"0:\">",dev[i],"0:</a></li>"})));
+		if(h)sendall(s, $(((char*[]){ HTML_HDR "<h1>Devices:</h1><ul>"})));
+		for(size_t i=0;i<sizeof(dev)/sizeof(*dev);i++)
+			h?sendall(s, $(((char*[]){ "<li><a href=\"./",dev[i],"0:\">",dev[i],"0:</a></li>"}))):sendall(s, $(((char*[]){dev[i],"\n"})));
 	} else
 	#endif
 	if(dirp && path[strlen(path)-1]!='/'){ // add trailing / for empty url or non / terminated folder path
@@ -30,13 +32,14 @@ void file_get(int s, char*url, char*path, char**headers, char**params, char**dat
 		for(int len;(len = read(fd, buf, sizeof(buf))) > 0;)
 			write(s, buf, len);
 	}else{
-		sendall(s, $(((char*[]){ HTML_HDR "<h1>",path+PATH_SHIFT,"</h1>"
+		if(h)sendall(s, $(((char*[]){ HTML_HDR "<h1>",path+PATH_SHIFT,"</h1>"
 		"<form method=post enctype='multipart/form-data'><input name=f type=file multiple><input type=submit na_me=action value=Upload></form>"
 		"<form method=post><ul>\n"})));
+		else sendall(s, $(((char*[]){ HTTP_HDR("200","text/plain") })));
 		for(struct dirent*ent;(ent = readdir(dirp));)
 			if(ent->d_name[0]!='.')
-				sendall(s, $(((char*[]){ "<li><input type=radio name=file value=\"",ent->d_name,"\"><a href=\"",ent->d_name,ENT_IS_A_DIR(ent)?"/":"","\">",ent->d_name,ENT_IS_A_DIR(ent)?"/":"","</a>","</li>\n"})));
-		sendall(s, $(((char*[]){ "</ul><input type=submit name=action value=Remove></form></html>"})));
+				h?sendall(s, $(((char*[]){ "<li><input type=radio name=file value=\"",ent->d_name,"\"><a href=\"",ent->d_name,ENT_IS_A_DIR(ent)?"/":"","\">",ent->d_name,ENT_IS_A_DIR(ent)?"/":"","</a>","</li>\n"}))):sendall(s, $(((char*[]){ ent->d_name,ENT_IS_A_DIR(ent)?"/":"","\n"})));
+		if(h)sendall(s, $(((char*[]){ "</ul><input type=submit name=action value=Remove></form></html>"})));
 	}
 	if(dirp)closedir(dirp);
 	if(fd>=0)close(fd);

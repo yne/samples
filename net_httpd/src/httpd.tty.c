@@ -6,40 +6,26 @@
 	for(int i = 0; params [i]; i += 2)printf("(%s=%s)\n",  params[i], params[i+1]);\
 	for(int i = 0; data   [i]; i += 2)printf("{%s=%s}\n",    data[i], data[i+1]);
 */
-char*base64(unsigned char*in, size_t len, char*out){
-	char*enc = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-	char pad = '=';
-	unsigned int i, j;
-	for (i = j = 0; i < len; i++)
-		switch (i % 3) {
-		case 0:
-			out[j++] = enc[(in[i] >> 2) & 0x3F];
-			continue;
-		case 1:
-			out[j++] = enc[((in[i-1] & 0x3) << 4) + ((in[i] >> 4) & 0xF)];
-			continue;
-		case 2:
-			out[j++] = enc[((in[i-1] & 0xF) << 2) + ((in[i] >> 6) & 0x3)];
-			out[j++] = enc[in[i] & 0x3F];
-		}
-	i--;
-	if ((i % 3) == 0) {
-		out[j++] = enc[(in[i] & 0x3) << 4];
-		out[j++] = pad;
-		out[j++] = pad;
-	} else if ((i % 3) == 1) {
-		out[j++] = enc[(in[i] & 0xF) << 2];
-		out[j++] = pad;
-	}
-	return out;
+void usage(int s, char*url, char*path, char**headers, char**params, char**data);
+static char* evalparam(char* str,char**args){
+	if(!str || *str!='$')return str;
+	return args[atoi(str+1)*2]?:str+2;
 }
-void ws_send(int s, char*str){
-	int len = strlen(str);
-	write(s, &(uint8_t[]){0x81,len}, 2);//FIN=1+OP=1, MASKED=0+LEN=4
-	write(s, str, len);
+struct{char*name,*url,**params;void (*handler)(int,char*,char*,char**,char**,char**);} cmd[]= {
+	{"ls"    ,"$1/",NULL,file_get},
+	{"lsmod" ,"/" ,NULL,module_get},
+	{"insmod","/" ,(char*[64]){"action","LoadStart" ,"path" ,"$1","args","$2"},module_post},
+	{"rmmod" ,"/" ,(char*[64]){"action","StopUnload","modid","$1","args","$2"},module_post},
+	{"help"  ,NULL,NULL,usage},
+	{"exit"  ,NULL,NULL,NULL},
+};
+void usage(int s, char*url, char*path, char**headers, char**params, char**data) {
+	for(size_t i = 0; i < sizeof(cmd)/sizeof(*cmd); i++)
+		sendall(s, $(((char*[]){cmd[i].name})));
 }
+
 void tty_get(int s, char*url, char*path, char**headers, char**params, char**data) {
-	char derived[128], *wskey = valueof(headers, "Sec-WebSocket-Key");
+	char concate[128], *wskey = valueof(headers, "Sec-WebSocket-Key");
 	if (!*wskey) {
 		sendall(s, $(((char*[]){ HTML_HDR "<body onload=\"ws=new WebSocket(location.href.replace(/^http/,'ws'));"
 		"ws.onmessage=function(ev){out.innerHTML+=ev.data+'\\n'};"
@@ -48,36 +34,23 @@ void tty_get(int s, char*url, char*path, char**headers, char**params, char**data
 		"<input disabled name=q placeholder=$><input type=button value=open onclick=document.body.onload()><input type=button value=close onclick=ws.close()></form>"})));
 		return;
 	}
-	snprintf($(derived),"%s258EAFA5-E914-47DA-95CA-C5AB0DC85B11", wskey);
-  unsigned char*hash = SHA1((unsigned char*)derived, strlen(derived), (unsigned char[SHA_DIGEST_LENGTH]){});
-	sendall(s, $(((char*[]){
-		"HTTP/1.1 101\r\n"
-		"Connection: Upgrade\r\n"
-		"Upgrade: websocket\r\n"
-		"Sec-WebSocket-Accept: ",base64(hash, SHA_DIGEST_LENGTH, (char[256]){}),"\r\n"
-		"\r\n"})));
-	ws_send(s, "Welcome");
-	for(;;){
-		uint8_t flag,len1,mask[4]; uint16_t len2=0;uint64_t len8=0;char payload[512]={};
-		                     if(read(s,&flag,sizeof(flag))!=sizeof(flag))break;
-		                     if(read(s,&len1,sizeof(len1))!=sizeof(len1))break;
-		if((len1&0x7F) == 126)if(read(s,&len2,sizeof(len2))!=sizeof(len2))break;
-		if((len1&0x7F) == 127)if(read(s,&len8,sizeof(len8))!=sizeof(len8))break;
-		if((len1&0x80) == 128)if(read(s, mask,sizeof(mask))!=sizeof(mask))break;
-		uint64_t size = len8?be64toh(len8):len2?be16toh(len2):len1&0x7F;
-		printf("%sOP:%X L:%i M:%08X >>>", flag&0xF0?"FIN ":"", flag&0x0F, (int)size, len1&0x80?*(uint32_t*)mask:0);
-		if(read(s, payload, size) != (int)size)break;
-		
-		for(size_t i = 0; i < size; i++)payload[i] ^= mask[i%4];
-		printf("%.*s<<<\n",(int)size,payload);
-		if(!strcmp((char*)payload,"ping"))
-			ws_send(s, "pong");
-		else if(!strcmp((char*)payload,"exit")){
-			ws_send(s, "byebye");
-			break;
-		}else{
-			ws_send(s, "unknown command");
+	snprintf($(concate),"%s258EAFA5-E914-47DA-95CA-C5AB0DC85B11", wskey);
+	unsigned char*hash = SHA1((unsigned char*)concate, strlen(concate), (unsigned char[SHA_DIGEST_LENGTH]){});
+	sendall(s, $(((char*[]){"HTTP/1.1 101\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Accept: ",base64(hash, SHA_DIGEST_LENGTH, (char[256]){}),"\r\n\r\n"})));
+	
+	ws_sendall(s, $(((char*[]){"WebShell type help to list cmd"})));
+	for(char* msg;strcmp((msg = ws_recv(s,(char[512]){})),"exit");){
+		sendall=ws_sendall;//TODO: use pthread_getspecific to be MT safe
+		char found=0, *params[64]={}, **args = pair($((char*[64]){msg}),$(" "),$(" "));
+		for(size_t i = 0; i < sizeof(cmd)/sizeof(*cmd); i++) {
+			if(strcmp(args[0],cmd[i].name))continue;
+			for(size_t j = 0 ; j < sizeof(params)/sizeof(*params); j++)
+				params[j]=evalparam(cmd[i].params[j], args);
+			cmd[i].handler(s, 0, evalparam(cmd[i].url, args), 0, params, params);
+			found=1;
 		}
+		if(*args[0] && !found)sendall(s, $(((char*[]){"unknown command: ", args[0]})));
+		sendall=http_sendall;
 	}
 	printf("The End\n");
 }
