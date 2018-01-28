@@ -6,6 +6,7 @@
 #include <endian.h>
 #endif
 
+#define CEIL(x, a)	(((x) + ((a) - 1)) & ~((a) - 1))
 #define HTTP_HDR(STATUS,TYPE) "HTTP/1.1 "STATUS"\r\nConnection: close\r\nContent-Type: "TYPE"\r\n\r\n"
 #define HTML_HDR HTTP_HDR("200", "text/html")"<!doctype html>\r\n<html>"
 #define $(val) val,sizeof(val)/sizeof(*val)

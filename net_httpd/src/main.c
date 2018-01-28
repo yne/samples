@@ -25,6 +25,7 @@
 #include "httpd.file.c"
 #include "httpd.module.c"
 #include "httpd.camera.c"
+#include "httpd.screen.c"
 #include "httpd.tty.c"
 
 struct{char*module,*export;void (*handler)(int,Request);} routes[64]= {
@@ -34,9 +35,12 @@ struct{char*module,*export;void (*handler)(int,Request);} routes[64]= {
 	{"/module/","POST",module_post},
 	{"/camera/","GET", camera_get },
 	{"/camera/","POST",camera_post},
+	{"/screen/","GET", screen_get },
+	{"/screen/","POST",screen_post},
 	{"/tty/",   "GET", tty_get    },
 	{"/tty/",   "POST",tty_post   },
 };
+
 void route404(int s, Request req){
 	sendall(s, $(((char*[]){HTTP_HDR("404","text/plain"), req.url, " Not Found"})));
 }
@@ -66,7 +70,6 @@ void (*route(char*url, char*meth))(int s, Request req){
 }
 void* requestHandler(void*arg){
 	int out=*(int*)arg;
-	//setsockopt(out, SOL_SOCKET, SO_RCVTIMEO, &(struct timeval){0,100*1000}, sizeof(struct timeval));
 	Request req = {};
 	req.method  = readsep(out, $((char[  16]){}), $(" "));
 	req.url     = readsep(out, $((char[4096]){}), $(" "));
@@ -78,6 +81,7 @@ void* requestHandler(void*arg){
 	req.params  = pair($((char*[64]){param}),$("&"),$("="));
 	req.formdata= strcmp(valueof(req.headers, "Content-Type"), "application/x-www-form-urlencoded")?(char*[256]){}:
 		            pair($((char*[256]){readlen(out, (char[4096]){},atoi(valueof(req.headers, "Content-Length")))}),$("&"),$("="));
+	printf("%s\n", req.url);
 	route(req.url, req.method)(out, req);
 	return close(out)?NULL:NULL;
 }
@@ -86,10 +90,7 @@ int requestHandler_vita(unsigned args, void*argp){return requestHandler(args?arg
 
 int main(int argc, char*argv[]) {
 #ifdef __vita__
-	psvDebugScreenPrintf("argc:%i argv:%p *argv:%p\n",argc,argv,argv?*argv:NULL);
-	
-	//printf("arg[%i] argv:%i argv0:%i argv00:%i\n",argc,argv,argv[0],argv[0][0]);
-	//for(int i=0;i<argc;i++)printf("arg %i>'%s'@%p [%i]\n",i,argv[i],argv[i],strlen(argv[i]));
+	psvDebugScreenInit();
 	static char net_mem[1*1024*1024];
 	sceSysmoduleLoadModule(SCE_SYSMODULE_NET);
 	sceNetInit(&(SceNetInitParam){net_mem, sizeof(net_mem)});
