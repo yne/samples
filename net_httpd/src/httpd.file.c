@@ -15,7 +15,7 @@ void file_get(int s, Request req) {
 	int fd = open(req.path+PATH_SHIFT, O_RDONLY);
 	#ifdef __vita__ // on vita "/" is the devices listing
 	if(req.path[0]=='/' && req.path[1]=='\0') {
-		char*dev[] = {"gro","grw","imc","os","pd","sa","tm","ud","uma","ur","ux","vd","vs","host"};
+		char*dev[] = {"app","gro","grw","imc","os","pd","sa","tm","ud","uma","ur","ux","vd","vs","host","savedata"};
 		if(h)sendall(s, $(((char*[]){ HTML_HDR "<h1>Devices:</h1><ul>"})));
 		for(size_t i=0;i<sizeof(dev)/sizeof(*dev);i++)
 			h?sendall(s, $(((char*[]){ "<li><a href=\"./",dev[i],"0:\">",dev[i],"0:/</a></li>"}))):sendall(s, $(((char*[]){"/",dev[i],"0:/\n"})));

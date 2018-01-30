@@ -31,10 +31,10 @@ Browse a directory
 curl $IP/file/ux0:/
 ```
 
-Upload a File
+Upload a `file.txt` to `ux0:/`
 
 ```
-curl -sF data=@file.txt $IP/file/ux0:/
+curl $IP/file/ux0:/ -F data=@file.txt
 ```
 
 Show a File
@@ -49,6 +49,15 @@ Download+unzip on the fly
 curl $IP/file/ux0:/data/psp2core-my.psp2dmp | gunzip > dump
 ```
 
+Remove all `*.psp2dmp` files from `ux0:/data/`:
+
+```
+for f in $(curl $IP/file/ux0:/data/ | grep psp2dmp); do
+	curl $IP/file/ux0:/data/ -daction=Unlink -dfile=$f;
+done
+```
+
+
 ### `/module/` Management
 
 List loaded modules : 
@@ -57,7 +66,7 @@ List loaded modules :
 curl $IP/module/
 ```
 
-Find a module by PID:
+Find a module by name, PID, Path:
 
 ```
 curl $IP/module/ | grep $PID | awk '{print $4}'
@@ -66,23 +75,46 @@ curl $IP/module/ | grep $PID | awk '{print $4}'
 Load `ux0:/my.suprx` module and start it with `hello` as `_start()` argument:
 
 ```
-PID=$(curl $IP/module/ -s --data "action=LoadStart&path=ux0%3A%2Fmy.suprx&args=hello")
+PID=$(curl $IP/module/ -daction=LoadStart -dpath=ux0:my.suprx -dargs=hello)
 ```
 
-This will store the module PID in the $PID variable.
+This will store the started module PID in the $PID variable.
 You can then, stop it with `bye` as argument and unload it using:
 
 ```
-curl $IP/module/ --data "action=StopUnload&modid=$ID&args=bye"
+curl $IP/module/ -daction=StopUnload -dmodid=$PID -dargs=bye
+```
+
+Deploy and reload a second HTTP Server
+
+```
+cmake .. && make && curl $IP/file/ux0: -F data=@net_http_sample.self
+curl -s $IP/module/ -daction=LoadStart -dpath=ux0:net_http_sample.self -dargs=8080 > pid &
+curl -L $IP:8080/exit/
+curl $IP/module/ -daction=StopUnload -dmodid=$(cat pid)
 ```
 
 ### `/camera/` access
 
 Get camera image (like IPcam)
 
+```
+//TODO
+```
+
 Do a timelapse
 
+```
+//TODO
+```
+
 ### `/screen/` capture
+
+Display the screen in the terminal (need w3m-img package)
+
+```
+w3m $IP/screen/
+```
 
 ### Continous Integration example
 
@@ -94,8 +126,8 @@ cd bin
 while inotifywait -se close_write ../src/*.c; do
 	cmake .. && make &&
 	curl -sF data=@plugin.suprx $IP/file/ux0:/ &&
-	ID=$(curl $IP/module/ -s --data "action=LoadStart&path=ux0%3A%2Fplugin.suprx&args=12345") && 
-	curl $IP/module/ --data "action=StopUnload&modid=$ID&args="; 
+	ID=$(curl $IP/module/ -daction=LoadStart -dpath=ux0:plugin.suprx -dargs=12345") && 
+	curl $IP/module/ -daction=StopUnload -dmodid=$ID; 
 done
 ```
 

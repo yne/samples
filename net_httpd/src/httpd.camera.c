@@ -17,13 +17,15 @@ void camera_get(int s, Request req) {
 	static SceJpegEncoderContext camEnc = &ctx;
 	static SceCameraInfo prevInfo;
 	static int prevDevice, rgba_reso, jpeg_reso;
+	static void *encbuf;
+
 	int res_table[][2] = {{0,0},{640,480},{320,240},{160,120},{352,288},{176,144},{480,272},{640,360},{640,360}};
 	int ret = 0, device = atoi(req.path+1), cur_res = strtol(valueof(req.params,"resolution"),NULL,0)%9;
-	static void *encbuf;
 	if(!encbuf){//allocate at least 640*480*4 bytes (ex: 256 * 1024 * 5)
 		rgba_reso = CEIL(res_table[1][0] * res_table[1][1] * 2, 256);
 		jpeg_reso = CEIL(res_table[1][0] * res_table[1][1], 256);
 		sceKernelGetMemBlockBase(sceKernelAllocMemBlock("camera", SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW, CEIL(rgba_reso + jpeg_reso, 0x40000), NULL), &encbuf);
+		printf("encbuf:%p \n",encbuf);
 	}
 
 	SceCameraInfo info = {sizeof(SceCameraInfo),
@@ -50,7 +52,7 @@ void camera_get(int s, Request req) {
 	if (sceCameraIsActive(device) > 0) {
 		sceCameraRead(device, &(SceCameraRead){sizeof(SceCameraRead)});
 		sceJpegEncoderCsc(camEnc, encbuf, info.pIBase, info.pitch, SCE_JPEGENC_PIXELFORMAT_ARGB8888);
-		int jpeg_size = sceJpegEncoderEncode(camEnc, encbuf);
+		int jpeg_size = sceJpegEncoderEncode(camEnc, encbuf);//multipart/x-mixed-replace;boundary=<boundary-name>
 		sendall(s, $(((char*[]){HTTP_HDR("200","image/jpeg")})));//Refresh: 1; url=http://www.example.org/
 		write(s, encbuf + rgba_reso, jpeg_size);
 	} else{

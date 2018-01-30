@@ -27,8 +27,14 @@
 #include "httpd.camera.c"
 #include "httpd.screen.c"
 #include "httpd.tty.c"
-
+static int alive = 1;
+void exit_get(int s, Request req) {
+	alive = 0;//TODO: find a way to unblock the accept()
+	sendall(s, $(((char*[]){"HTTP/1.1 301\r\nLocation: ",req.url, "/\r\n\r\n"})));
+	close(s);
+}
 struct{char*module,*export;void (*handler)(int,Request);} routes[64]= {
+	{"/exit/",  "GET", exit_get   },
 	{"/file/",  "GET", file_get   },
 	{"/file/",  "POST",file_post  },
 	{"/module/","GET", module_get },
@@ -87,24 +93,26 @@ void* requestHandler(void*arg){
 }
 int requestHandler_vita(unsigned args, void*argp){return requestHandler(args?argp:NULL)!=NULL;}
 
-
 int main(int argc, char*argv[]) {
 #ifdef __vita__
 	psvDebugScreenInit();
 	static char net_mem[1*1024*1024];
-	sceSysmoduleLoadModule(SCE_SYSMODULE_NET);
-	sceNetInit(&(SceNetInitParam){net_mem, sizeof(net_mem)});
+	int ret = sceSysmoduleLoadModule(SCE_SYSMODULE_NET);
+	int res = sceNetInit(&(SceNetInitParam){net_mem, sizeof(net_mem)});
+	printf("module = %08X, init = %08X\n");
 #endif
 	int out, in = socket(AF_INET, SOCK_STREAM, 0), port = argc>1?atoi(argv[1]):PORT;
 	setsockopt(in, SOL_SOCKET, SO_REUSEPORT, &(int[]){1}, sizeof(int));
 	bind(in, (struct sockaddr *) &((struct sockaddr_in){.sin_family=AF_INET,htons(port),{}}), sizeof(struct sockaddr_in));
 	listen(in,5);
-	while ((out=accept(in, NULL, NULL)) >= 0)
+	while (alive && (out=accept(in, NULL, NULL)) >= 0)
 		pthread_create(&(pthread_t){0}, NULL, requestHandler, &out);
 	close(in);
 #ifdef __vita__
-	sceNetTerm();
-	sceSysmoduleUnloadModule(SCE_SYSMODULE_NET);
+	// dodge newlib's exit() called on main() return that would kill our parent
+	if(!alive)sceKernelExitDeleteThread(0);
+	//sceNetTerm();
+	//sceSysmoduleUnloadModule(SCE_SYSMODULE_NET);
 #endif
 	return 0;
 }

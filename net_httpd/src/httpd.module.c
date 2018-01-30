@@ -21,21 +21,21 @@ void module_get(int s, Request req) {
 	SceUID modids[32];
 	int num = sizeof(modids)/sizeof(*modids);
 	int ret = sceKernelGetModuleList(0x80|0x1, modids, &num);
-	for(int n = 0; n < num; n++){
+	for(int n = 0; n < num; n++) {
 		SceKernelModuleInfo mi;
 		ret = sceKernelGetModuleInfo(modids[n],&mi);
 		sprintf(line, h?FMT_HTML:FMT_TXT, h?modids[n]:0, modids[n], mi.flags, mi.module_name, mi.path, mi.path);
 		sendall(s, $(((char*[]){line})));
 	}
 #else
-	for(long unsigned n = 1; n < 16; n++){
+	for(long unsigned n = 1; n < 16; n++) {
 		sprintf(line, h?FMT_HTML:FMT_TXT, h?n:0, n, 0LU, "myExample", "ux0:example.suprx", "ux0:example.suprx");
 		sendall(s, $(((char*[]){line})));
 	}
 #endif
 	if(h)sendall(s, $(((char*[]){"</pre></form>"})));
 } 
-void module_post(int s, Request req){ 
+void module_post(int s, Request req) {
 	int ret = -1, status = 0;
 	char*action = valueof(req.formdata,"action");
 	int modid = strtol(valueof(req.formdata,"modid")?:"0",NULL,0);
@@ -43,7 +43,7 @@ void module_post(int s, Request req){
 	char*fpath = unescape(valueof(req.formdata,"path"));
 	char*argp = unescape(valueof(req.formdata,"args"));
 	int  args = strlen(argp)+1;// args must include the NUL delimiter
-	debug("%s 0x%08X %s (%.*s) [%08X]\n", action, modid, fpath, args, argp, flags);
+	debug("%s %#.X%s (%.*s) ... ", action, modid, fpath, args, argp);
 	#ifdef __vita__
 	if(!strcasecmp(action,"Load"      ))ret = sceKernelLoadModule      (fpath,             flags, NULL         );
 	if(!strcasecmp(action,"LoadStart" ))ret = sceKernelLoadStartModule (fpath, args, argp, flags, NULL, &status);
@@ -52,7 +52,7 @@ void module_post(int s, Request req){
 	if(!strcasecmp(action,"Unload"    ))ret = sceKernelUnloadModule    (modid,             flags, NULL         );
 	if(!strcasecmp(action,"StopUnload"))ret = sceKernelStopUnloadModule(modid, args, argp, flags, NULL, &status);
 	#endif
-	debug("ret=0x%08X\n", ret);
+	debug("0x%08X\n", ret);
 	char head[1024],body[1024];
 	if(ret < 0) {
 		snprintf(head, sizeof(head), HTTP_HDR("500 0x%08X","text/plain") , ret);
