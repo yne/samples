@@ -1,108 +1,121 @@
 # Goals
-- Automates development process on any PS consoles
-- Use standards protocols (http/websocket)
-- Extensible API: other webapp can interact with it (ex: for VPK install)
-
-# What is offer
-
-## POSIX compliant
-The Source shall compile and work on any libc compliant plateform
-
-## Basic HTML interface
-
-Work on any browser from FF and Chrome to lynx and w3m.
-Go to http://0.0.0.0 from your vita to access it.
-No javascript needed.
-
-## Customisable UI
-Modify your style.css to your needs
-
-## RESTful Micro service architecture
-Easy to remember, easy to use from your host terminal.
-
-The `utils.c` functions allow to easily create new microservices.
-Microservices are modular so you can create/disable any service according to your needs.
+- Automate development process on any consoles
+- Follow web standards (http/websocket), so no fancy client-side apps are required
+- Complient with any web client (VitaWebView, Chrome, lynx, w3m, curl)
+- Easy customisable UI (see style.css)
+- Allow web sites interaction (ie: VPK install)
 
 ### `/file/` Management
 
-Browse a directory
+#### List directory content
 
-```
-curl $IP/file/ux0:/
-```
-
-Upload a `file.txt` to `ux0:/`
-
-```
-curl $IP/file/ux0:/ -F data=@file.txt
+```sh
+curl $VITAIP/file/ux0:/
 ```
 
-Show a File
+#### Upload a `file.txt` to `ux0:/`
 
-```
-curl $IP/file/ux0:/id.dat
-```
-
-Download+unzip on the fly
-
-```
-curl $IP/file/ux0:/data/psp2core-my.psp2dmp | gunzip > dump
+```sh
+curl $VITAIP/file/ux0:/ -F data=@file.txt
 ```
 
-Remove all `*.psp2dmp` files from `ux0:/data/`:
+#### Show a File
 
+```sh
+curl $VITAIP/file/ux0:/id.dat
 ```
-for f in $(curl $IP/file/ux0:/data/ | grep psp2dmp); do
-	curl $IP/file/ux0:/data/ -daction=Unlink -dfile=$f;
+
+#### Download+unzip on the fly
+
+```sh
+curl $VITAIP/file/ux0:/data/psp2core-my.psp2dmp | gunzip > dump
+```
+
+#### Remove all `*.psp2dmp` files from `ux0:/data/`:
+
+```sh
+for f in $(curl $VITAIP/file/ux0:/data/ | grep psp2dmp); do
+	curl $VITAIP/file/ux0:/data/ -daction=Unlink -dfile=$f;
 done
 ```
 
 
 ### `/module/` Management
 
-List loaded modules : 
+#### List loaded modules :
 
-```
-curl $IP/module/
-```
-
-Find a module by name, PID, Path:
-
-```
-curl $IP/module/ | grep $PID | awk '{print $4}'
+```sh
+curl $VITAIP/module/
 ```
 
-Load `ux0:/my.suprx` module and start it with `hello` as `_start()` argument:
+#### Find a module name by PID, Path...:
 
-```
-PID=$(curl $IP/module/ -daction=LoadStart -dpath=ux0:my.suprx -dargs=hello)
-```
-
-This will store the started module PID in the $PID variable.
-You can then, stop it with `bye` as argument and unload it using:
-
-```
-curl $IP/module/ -daction=StopUnload -dmodid=$PID -dargs=bye
+```sh
+curl $VITAIP/module/ | grep $PID | awk '{print $4}'
 ```
 
-Deploy and reload a second HTTP Server
+#### Load + Start a module:
 
 ```
-cmake .. && make && curl $IP/file/ux0: -F data=@net_http_sample.self
-curl -s $IP/module/ -daction=LoadStart -dpath=ux0:net_http_sample.self -dargs=8080 > pid &
-curl -L $IP:8080/exit/
-curl $IP/module/ -daction=StopUnload -dmodid=$(cat pid)
+PID=$(curl $VITAIP/module/ -daction=LoadStart -dpath=ux0:my.suprx -dargs=hello)
+```
+
+This will Load `ux0:my.suprx` and start it with `hello` as `_start()`/`main()` argument
+The LoadStart value (pid) will be stored so we can StopUnload it later.
+
+#### Stop + Unload a module:
+
+```sh
+curl $VITAIP/module/ -daction=StopUnload -dmodid=$PID -dargs=bye
+```
+This will call the `module_stop()` function with `bye` as argument, then unload the module.
+ 
+#### Eboot file
+
+Eboots are more tricky than plugins suprx :
+- They will hold the module Starting call until they they `return`/`exit()`ed.
+- If they tries to `return`/`exit()`, they crt0 will call `sceKernelExitProcess()` wich kill every processes (including the HTTPserver).
+
+In order to start an eboot we must:
+- Use `sceKernelExitDeleteThread(0)` instead of return/exit
+- Create a killswitch if you have a kind of `while(1)` eboot
+- Load the eboot asynchronously (don't wait for it PID to be returned)
+
+```sh
+# Compile and upload our eboot (named net_http_sample.self here, yes I know it's confusing)
+cmake .. && make && curl $VITAIP/file/ux0: -F data=@net_http_sample.self
+# Asynchrounously (`&`) Load+Start it with args and store it PID in a `pid` file
+curl -s $VITAIP/module/ -daction=LoadStart -dpath=ux0:net_http_sample.self -dargs=8080 > pid &
+# Insert your test / wait / screenfetch here
+sleep 5
+# Call the children killswitch (because loaded app is a while(1) kind)
+curl -L $VITAIP:8080/exit/
+# Now that the eboot is terminated, we can StopUnload it using it freshly returned pid
+curl $VITAIP/module/ -daction=StopUnload -dmodid=$(cat pid)
+```
+
+We can even reload our app on source change:
+
+```sh
+while inotifywait -se close_write ../src/*.c; do
+	cmake ..>/dev/null && make    >/dev/null && curl $VITAIP/file/ux0: -F data=@net_http_sample.self
+	curl -s $VITAIP/module/ -daction=LoadStart -dpath=ux0:net_http_sample.self -dargs=8080 > pid & sleep 1
+	curl -s $VITAIP:8080/camera/0.jpg
+	curl -s $VITAIP/screen/go.jpg > screen.jpg
+	curl -L $VITAIP:8080/exit/ 2> /dev/null
+	curl -s $VITAIP/module/ -daction=StopUnload -dmodid=$(cat pid)
+done
 ```
 
 ### `/camera/` access
 
-Get camera image (like IPcam)
+#### Get camera image (like IPcam)
 
 ```
 //TODO
 ```
 
-Do a timelapse
+#### Timelapse
 
 ```
 //TODO
@@ -110,39 +123,30 @@ Do a timelapse
 
 ### `/screen/` capture
 
-Display the screen in the terminal (need w3m-img package)
+#### Display the screen in the terminal
 
 ```
-w3m $IP/screen/
+w3m $VITAIP/screen/
 ```
+
+need w3m-img package
 
 ### Continous Integration example
 
-The following snipet rebuild and loadStart your binary on the as soon as you changed any of your souces files.
+The following snipet build, upload and reload your binary on the console
+when any of it sources files changes.
 
-```
-IP=192.168.1.100
-cd bin
+```sh
 while inotifywait -se close_write ../src/*.c; do
 	cmake .. && make &&
-	curl -sF data=@plugin.suprx $IP/file/ux0:/ &&
-	ID=$(curl $IP/module/ -daction=LoadStart -dpath=ux0:plugin.suprx -dargs=12345") && 
-	curl $IP/module/ -daction=StopUnload -dmodid=$ID; 
+	curl -sF data=@plugin.suprx $VITAIP/file/ux0:/ &&
+	ID=$(curl $VITAIP/module/ -daction=LoadStart -dpath=ux0:plugin.suprx -dargs=12345") &&
+	curl $VITAIP/module/ -daction=StopUnload -dmodid=$ID;
 done
 ```
 
+## Create your own RESTful Micro service
+Easy to remember, easy to use from your host terminal.
 
-## CURL file upload dump
-```
-Host: 0.0.0.0:8080
-Content-Length: 6331 << size of all form-data headers + file content
-Expect: 100-continue << Only in curl
-Content-Type: multipart/form-data; boundary=------------------------3367985a15c2414c
-
---------------------------3367985a15c2414c
-Content-Disposition: form-data; name="data"; filename="Makefile"
-Content-Type: application/octet-stream
-
-[The file]
---------------------------3367985a15c2414c--
-```
+The `utils.c` functions allow to easily create new microservices.
+Microservices are modular so you can create/disable any service according to your needs.

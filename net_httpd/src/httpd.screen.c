@@ -7,7 +7,7 @@ void screen_get(int s, Request req) {
 
 	int h = !!strstr(valueof(req.headers, "Accept"), "html");
 	if( h && strlen(req.path) == 1 ) {
-		sendall(s, $(((char*[]){HTML_HDR, "<img src=whatever.jpg?ratio=128>"})));
+		sendall(s, $(((char*[]){HTML_HDR, "<img src=whatever.jpg?mode=0&ratio=128>"})));
 		return;
 	}
 	if (!frameBuf.base && sceDisplayGetFrameBuf(&frameBuf, SCE_DISPLAY_SETBUF_IMMEDIATE) < 0) {
@@ -34,10 +34,7 @@ void screen_get(int s, Request req) {
 	int jpeg_size = sceJpegEncoderEncode(encCtx, encbuf);
 	if (jpeg_size > 0) {
 		sendall(s, $(((char*[]){HTTP_HDR("200","image/jpeg")})));
-		for(int i=0;i<100;i++){
-			write(s, encbuf + rgba_reso, jpeg_size);
-			sceKernelDelayThread(1000*1000);
-		}
+		send(s, encbuf + rgba_reso, jpeg_size, 0);
 	} else {
 		sendall(s, $(((char*[]){HTTP_HDR("500","text/plain")})));
 	}

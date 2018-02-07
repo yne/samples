@@ -13,6 +13,22 @@ void camera_get(int s, Request req) {
 		return;
 	}
 #ifdef __vita__
+	sendall(s, $(((char*[]){HTTP_HDR("200","text/plain"), "sup!\n\n"})));
+
+	void* base;
+	SceUID memblock = sceKernelAllocMemBlock("camera", SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW, 256 * 1024 * 5, NULL);
+	int res = sceKernelGetMemBlockBase(memblock, &base);
+	printf("base = %08X (%i)\n\n",base,res);
+	sceKernelFreeMemBlock(memblock);
+
+
+
+
+
+
+
+
+	return;
 	static char ctx[0x200];//sceJpegEncoderGetContextSize()=384
 	static SceJpegEncoderContext camEnc = &ctx;
 	static SceCameraInfo prevInfo;
@@ -25,7 +41,7 @@ void camera_get(int s, Request req) {
 		rgba_reso = CEIL(res_table[1][0] * res_table[1][1] * 2, 256);
 		jpeg_reso = CEIL(res_table[1][0] * res_table[1][1], 256);
 		sceKernelGetMemBlockBase(sceKernelAllocMemBlock("camera", SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW, CEIL(rgba_reso + jpeg_reso, 0x40000), NULL), &encbuf);
-		printf("encbuf:%p \n",encbuf);
+		printf("encbuf: %p\n",encbuf); 
 	}
 
 	SceCameraInfo info = {sizeof(SceCameraInfo),
@@ -53,10 +69,10 @@ void camera_get(int s, Request req) {
 		sceCameraRead(device, &(SceCameraRead){sizeof(SceCameraRead)});
 		sceJpegEncoderCsc(camEnc, encbuf, info.pIBase, info.pitch, SCE_JPEGENC_PIXELFORMAT_ARGB8888);
 		int jpeg_size = sceJpegEncoderEncode(camEnc, encbuf);//multipart/x-mixed-replace;boundary=<boundary-name>
-		sendall(s, $(((char*[]){HTTP_HDR("200","image/jpeg")})));//Refresh: 1; url=http://www.example.org/
+		sendall(s, $(((char*[]){HTTP_HDR("200","image/jpeg")})));
 		write(s, encbuf + rgba_reso, jpeg_size);
 	} else{
-		sendall(s, $(((char*[]){HTTP_HDR("500","text/plain")})));//Refresh: 1; url=http://www.example.org/
+		sendall(s, $(((char*[]){HTTP_HDR("500","text/plain")})));
 	}
 #else
 	sendall(s, $(((char*[]){HTTP_HDR("200","image/jpeg")})));//Refresh: 1; url=http://www.example.org/

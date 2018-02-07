@@ -9,7 +9,7 @@
 #include <fcntl.h>
 #include <pthread.h>
 #define PORT 8080
-#define debug printf
+#define debug(...)
 
 #ifdef __vita__
 #undef  PORT    // vita userland programs can bind on < 1024 ports
@@ -17,6 +17,7 @@
 #include <vitasdk.h>
 #include "debugScreen.h"
 #define printf  psvDebugScreenPrintf
+#define exit    sceKernelExitDeleteThread
 #define rmdir   sceIoRmdir
 #define pthread_create(thid, opt, func, argp) sceKernelStartThread(sceKernelCreateThread(__func__,func##_vita,0x10000100,0x10000,0,0,NULL), sizeof(argp), argp)
 #endif
@@ -27,10 +28,11 @@
 #include "httpd.camera.c"
 #include "httpd.screen.c"
 #include "httpd.tty.c"
+
 static int alive = 1;
 void exit_get(int s, Request req) {
-	alive = 0;//TODO: find a way to unblock the accept()
-	sendall(s, $(((char*[]){"HTTP/1.1 301\r\nLocation: ",req.url, "/\r\n\r\n"})));
+	alive = 0;
+	sendall(s, $(((char*[]){"HTTP/1.1 301\r\nLocation: ",req.url, "-\r\n\r\n"})));
 	close(s);
 }
 struct{char*module,*export;void (*handler)(int,Request);} routes[64]= {
@@ -87,7 +89,6 @@ void* requestHandler(void*arg){
 	req.params  = pair($((char*[64]){param}),$("&"),$("="));
 	req.formdata= strcmp(valueof(req.headers, "Content-Type"), "application/x-www-form-urlencoded")?(char*[256]){}:
 		            pair($((char*[256]){readlen(out, (char[4096]){},atoi(valueof(req.headers, "Content-Length")))}),$("&"),$("="));
-	printf("%s\n", req.url);
 	route(req.url, req.method)(out, req);
 	return close(out)?NULL:NULL;
 }
@@ -97,22 +98,16 @@ int main(int argc, char*argv[]) {
 #ifdef __vita__
 	psvDebugScreenInit();
 	static char net_mem[1*1024*1024];
-	int ret = sceSysmoduleLoadModule(SCE_SYSMODULE_NET);
-	int res = sceNetInit(&(SceNetInitParam){net_mem, sizeof(net_mem)});
-	printf("module = %08X, init = %08X\n");
+	sceSysmoduleLoadModule(SCE_SYSMODULE_NET);
+	sceNetInit(&(SceNetInitParam){net_mem, sizeof(net_mem)});
 #endif
 	int out, in = socket(AF_INET, SOCK_STREAM, 0), port = argc>1?atoi(argv[1]):PORT;
 	setsockopt(in, SOL_SOCKET, SO_REUSEPORT, &(int[]){1}, sizeof(int));
 	bind(in, (struct sockaddr *) &((struct sockaddr_in){.sin_family=AF_INET,htons(port),{}}), sizeof(struct sockaddr_in));
-	listen(in,5);
+	listen(in, 5);
 	while (alive && (out=accept(in, NULL, NULL)) >= 0)
 		pthread_create(&(pthread_t){0}, NULL, requestHandler, &out);
 	close(in);
-#ifdef __vita__
 	// dodge newlib's exit() called on main() return that would kill our parent
-	if(!alive)sceKernelExitDeleteThread(0);
-	//sceNetTerm();
-	//sceSysmoduleUnloadModule(SCE_SYSMODULE_NET);
-#endif
-	return 0;
+	return exit(0);
 }

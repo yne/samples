@@ -56,8 +56,8 @@ void  ws_sendall(int s, char*str[], size_t max){
 		//ifcontinue;//skip 200 HTTP headers
 		int len = strlen(data);
 		if(data[len-1]=='\n')len--;
-		write(s, &(uint8_t[]){(i==(max-1)?0x80:0) | !i,len}, 2);//FIN=1|OP=1, MASKED=0+LEN=4
-		write(s, data, len);
+		send(s, &(uint8_t[]){(i==(max-1)?0x80:0) | !i,len}, 2, 0);//FIN=1|OP=1, MASKED=0+LEN=4
+		send(s, data, len, 0);
 	}
 }
 char* ws_recv(int s, char*payload){
@@ -76,7 +76,7 @@ char* ws_recv(int s, char*payload){
 }
 void  http_sendall(int s, char*str[], size_t max) {
 	for(size_t i = 0; i < max; i++)
-		write(s, str[i], strlen(str[i]));
+		send(s, str[i], strlen(str[i]), 0);
 }
 char* readlen(int s, char*buf, size_t len) {
 	int ret, pos=0;
