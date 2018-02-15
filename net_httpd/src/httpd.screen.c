@@ -1,43 +1,41 @@
+SceUID scrJpgMem;
+void* screenEncode(void*rgba_buf, int realwidth, int width, int height, int*outsize){
+	char ctx[0x200];//sceJpegEncoderGetContextSize()=384
+	SceJpegEncoderContext encCtx = &ctx;
+	void* cbcr_buf, *jpeg_buf;
+	int cbcr_size = CEIL(width * height * 2, 256); // 4:2:0=>(6*w*h)/4 // 4:2:2=>(w*h*8)/4
+	int jpeg_size = CEIL(width * height, 256);
+	int bloc_size = CEIL(cbcr_size + jpeg_size, 256 * 1024);
+	int ret, format = SCE_JPEGENC_PIXELFORMAT_YCBCR420 | SCE_JPEGENC_PIXELFORMAT_CSC_ARGB_YCBCR;
+	if(scrJpgMem){
+		sceJpegEncoderEnd(encCtx);
+		sceKernelFreeMemBlock(scrJpgMem);
+		scrJpgMem = 0;
+	}
+	if (!scrJpgMem) {
+		scrJpgMem = sceKernelAllocMemBlock("scrJpgMem", SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW, bloc_size, NULL);
+		sceKernelGetMemBlockBase(scrJpgMem, &cbcr_buf);
+		jpeg_buf = cbcr_buf + cbcr_size;
+		if(sceJpegEncoderInit(encCtx, width, height, format, jpeg_buf, jpeg_size))return NULL;
+		if(sceJpegEncoderSetOutputAddr(encCtx, jpeg_buf, jpeg_size))return NULL;
+	}
+	//sceJpegEncoderSetHeaderMode(encCtx,strtol(valueof(req.params,"mode"),NULL,0));
+	//sceJpegEncoderSetCompressionRatio(encCtx, strtol(valueof(req.params,"ratio"),NULL,0));
+	if(sceJpegEncoderCsc(encCtx, cbcr_buf, rgba_buf, realwidth, SCE_JPEGENC_PIXELFORMAT_ARGB8888))return NULL;
+	if((*outsize=sceJpegEncoderEncode(encCtx, cbcr_buf))<0)return NULL;
+	return jpeg_buf;
+}
 void screen_get(int s, Request req) {
-	static char ctx[0x200];//sceJpegEncoderGetContextSize()=384
-	static SceJpegEncoderContext encCtx = &ctx;
-	static SceDisplayFrameBuf frameBuf = {sizeof(SceDisplayFrameBuf)};
-	static int memuid, rgba_reso, jpeg_reso;
-	static void* encbuf;
-
-	int h = !!strstr(valueof(req.headers, "Accept"), "html");
+	int size=0, h = !!strstr(valueof(req.headers, "Accept"), "html");
 	if( h && strlen(req.path) == 1 ) {
 		sendall(s, $(((char*[]){HTML_HDR, "<img src=whatever.jpg?mode=0&ratio=128>"})));
 		return;
 	}
-	if (!frameBuf.base && sceDisplayGetFrameBuf(&frameBuf, SCE_DISPLAY_SETBUF_IMMEDIATE) < 0) {
-		sendall(s, $(((char*[]){HTTP_HDR("500","text/plain")})));
-		return;
-	}
-	// already initialized but resolutions changed: reset the encoder
-	if(jpeg_reso && jpeg_reso != CEIL((frameBuf.width * frameBuf.height) << 1, 256)){
-		sceJpegEncoderEnd(encCtx);
-		sceKernelFreeMemBlock(memuid);
-		memuid = 0;
-	}
-	if (!memuid) { // first encoder call = init, TODO: detect resolutions changes ?
-		rgba_reso = CEIL(frameBuf.width * frameBuf.height *2, 256);
-		jpeg_reso = CEIL(frameBuf.width * frameBuf.height, 256);
-		memuid = sceKernelAllocMemBlock("sceJpegEncoder", SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW, CEIL(rgba_reso + jpeg_reso, 0x40000), NULL);
-		sceKernelGetMemBlockBase(memuid, &encbuf);
-		sceJpegEncoderInit(encCtx, frameBuf.width, frameBuf.height, SCE_JPEGENC_PIXELFORMAT_YCBCR420 | SCE_JPEGENC_PIXELFORMAT_CSC_ARGB_YCBCR, encbuf + rgba_reso, jpeg_reso);
-		sceJpegEncoderSetOutputAddr(encCtx, encbuf + rgba_reso, jpeg_reso);
-	}
-	sceJpegEncoderSetHeaderMode(encCtx,strtol(valueof(req.params,"mode"),NULL,0));
-	sceJpegEncoderSetCompressionRatio(encCtx, strtol(valueof(req.params,"ratio"),NULL,0));
-	sceJpegEncoderCsc(encCtx, encbuf, frameBuf.base, frameBuf.pitch, SCE_JPEGENC_PIXELFORMAT_ARGB8888);
-	int jpeg_size = sceJpegEncoderEncode(encCtx, encbuf);
-	if (jpeg_size > 0) {
-		sendall(s, $(((char*[]){HTTP_HDR("200","image/jpeg")})));
-		send(s, encbuf + rgba_reso, jpeg_size, 0);
-	} else {
-		sendall(s, $(((char*[]){HTTP_HDR("500","text/plain")})));
-	}
+	SceDisplayFrameBuf frameBuf = {sizeof(SceDisplayFrameBuf)};
+	sceDisplayGetFrameBuf(&frameBuf, SCE_DISPLAY_SETBUF_IMMEDIATE);
+	void* buf = screenEncode(frameBuf.base, frameBuf.pitch, frameBuf.width, frameBuf.height, &size);
+	sendall(s, $(((char*[]){buf?HTTP_HDR("200","image/jpeg"):HTTP_HDR("500","text/plain")})));
+	send(s, buf, size, 0);
 }
 void screen_post(int s, Request req){
 	// What do ...

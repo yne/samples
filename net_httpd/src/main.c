@@ -20,6 +20,15 @@
 #define exit    sceKernelExitDeleteThread
 #define rmdir   sceIoRmdir
 #define pthread_create(thid, opt, func, argp) sceKernelStartThread(sceKernelCreateThread(__func__,func##_vita,0x10000100,0x10000,0,0,NULL), sizeof(argp), argp)
+static int heartBeatThread(SceSize args, void *argp) {
+	sceShellUtilLock(SCE_SHELL_UTIL_LOCK_TYPE_PS_BTN);
+	scePowerRequestDisplayOff();
+	for(;;){
+		sceKernelPowerTick(SCE_KERNEL_POWER_TICK_DISABLE_AUTO_SUSPEND);
+		sceKernelDelayThread(9 * 1000 * 1000);
+	}
+	return 0;
+}
 #endif
 
 #include "utils.c"
@@ -32,6 +41,9 @@
 static int alive = 1;
 void exit_get(int s, Request req) {
 	alive = 0;
+	sceKernelFreeMemBlock(camMem);
+	sceKernelFreeMemBlock(camJpgMem);
+	sceKernelFreeMemBlock(scrJpgMem);
 	sendall(s, $(((char*[]){"HTTP/1.1 301\r\nLocation: ",req.url, "-\r\n\r\n"})));
 	close(s);
 }
@@ -100,6 +112,7 @@ int main(int argc, char*argv[]) {
 	static char net_mem[1*1024*1024];
 	sceSysmoduleLoadModule(SCE_SYSMODULE_NET);
 	sceNetInit(&(SceNetInitParam){net_mem, sizeof(net_mem)});
+	//sceKernelStartThread(sceKernelCreateThread("HBT", heartBeatThread, 0x10000100, 0x40000, 0, 0, NULL), 0, NULL);
 #endif
 	int out, in = socket(AF_INET, SOCK_STREAM, 0), port = argc>1?atoi(argv[1]):PORT;
 	setsockopt(in, SOL_SOCKET, SO_REUSEPORT, &(int[]){1}, sizeof(int));
