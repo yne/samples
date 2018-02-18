@@ -22,7 +22,7 @@
 #define pthread_create(thid, opt, func, argp) sceKernelStartThread(sceKernelCreateThread(__func__,func##_vita,0x10000100,0x10000,0,0,NULL), sizeof(argp), argp)
 static int heartBeatThread(SceSize args, void *argp) {
 	sceShellUtilLock(SCE_SHELL_UTIL_LOCK_TYPE_PS_BTN);
-	scePowerRequestDisplayOff();
+	//scePowerRequestDisplayOff();
 	for(;;){
 		sceKernelPowerTick(SCE_KERNEL_POWER_TICK_DISABLE_AUTO_SUSPEND);
 		sceKernelDelayThread(9 * 1000 * 1000);
@@ -41,7 +41,8 @@ static int heartBeatThread(SceSize args, void *argp) {
 static int alive = 1;
 void exit_get(int s, Request req) {
 	alive = 0;
-	sceKernelFreeMemBlock(camMem);
+	sceKernelFreeMemBlock(camMem[0]);
+	sceKernelFreeMemBlock(camMem[1]);
 	sceKernelFreeMemBlock(camJpgMem);
 	sceKernelFreeMemBlock(scrJpgMem);
 	sendall(s, $(((char*[]){"HTTP/1.1 301\r\nLocation: ",req.url, "-\r\n\r\n"})));
