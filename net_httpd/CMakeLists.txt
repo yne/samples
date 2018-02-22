@@ -31,6 +31,7 @@ target_link_libraries(${SHORT_NAME}
   SceCtrl_stub
   SceAudio_stub 
   SceDisplay_stub
+  SceShellSvc_stub
   ScePower_stub
   SceSysmodule_stub
   SceNet_stub

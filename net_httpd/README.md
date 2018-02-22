@@ -70,15 +70,16 @@ curl $VITAIP/module/ -daction=StopUnload -dmodid=$PID -dargs=bye
 ```
 This will call the `module_stop()` function with `bye` as argument, then unload the module.
  
-#### Eboot file
+#### Eboot suprx file
 
-Eboots are more tricky than plugins suprx :
-- They will hold the module Starting call until they they `return`/`exit()`ed.
-- If they tries to `return`/`exit()`, they crt0 will call `sceKernelExitProcess()` wich kill every processes (including the HTTPserver).
+Eboots suprx are more tricky to load than plugins suprx :
+- They will hold the module loader starting call until they `return`/`exit()`ed.
+- If they tries to `return`/`exit()`, they crt0 will call `sceKernelExitProcess()`
+- `sceKernelExitProcess()` wich kill every processes, including the loader (our server).
 
-In order to start an eboot we must:
+In order to start an eboot suprx we must:
 - Use `sceKernelExitDeleteThread(0)` instead of return/exit
-- Create a killswitch if you have a kind of `while(1)` eboot
+- If you have an infinite-loop eboot : create a killswitch to break the loop
 - Load the eboot asynchronously (don't wait for it PID to be returned)
 
 ```sh
@@ -97,28 +98,38 @@ curl $VITAIP/module/ -daction=StopUnload -dmodid=$(cat pid)
 We can even reload our app on source change:
 
 ```sh
+set -x
 while inotifywait -se close_write ../src/*.c; do
-	cmake ..>/dev/null && make    >/dev/null && curl $VITAIP/file/ux0: -F data=@net_http_sample.self
-	curl -s $VITAIP/module/ -daction=LoadStart -dpath=ux0:net_http_sample.self -dargs=8080 > pid & sleep 1
-	curl -s $VITAIP:8080/camera/0.jpg
-	curl -s $VITAIP/screen/go.jpg > screen.jpg
-	curl -L $VITAIP:8080/exit/ 2> /dev/null
-	curl -s $VITAIP/module/ -daction=StopUnload -dmodid=$(cat pid)
+cmake ..>/dev/null && make    >/dev/null && curl $VITAIP/file/ux0: -F data=@net_http_sample.self &&
+bash -c "curl -s $VITAIP/module/ -daction=LoadStart -dpath=ux0:net_http_sample.self -dargs=8080 > pid &" && sleep 1 &&
+curl -s $VITAIP:8080/camera/0.jpg &&
+curl -s $VITAIP/screen/go.jpg > screen.jpg &&
+curl -L $VITAIP:8080/exit/ 2> /dev/null &&
+curl -s $VITAIP/module/ -daction=StopUnload -dmodid=$(cat pid)
 done
 ```
 
 ### `/camera/` access
 
+#### Camera MJPEG Stream
+
+```
+xdg-open http://$VITAIP/camera/1.mjpg;
+```
+
 #### Get camera image (like IPcam)
 
 ```
-//TODO
+curl $VITAIP/camera/1 > cam.jpg;
 ```
 
 #### Timelapse
 
 ```
-//TODO
+while sleep 60; do
+	curl $VITAIP/camera/1 > $(date -Iseconds).jpg;
+done
+cat *.jpg | ffmpeg -f image2pipe -i - timelapse.mkv
 ```
 
 ### `/screen/` capture
