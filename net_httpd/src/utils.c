@@ -8,12 +8,40 @@
 
 #define CEIL(x, a)	(((x) + ((a) - 1)) & ~((a) - 1))
 #define HTTP_HDR(STATUS,TYPE) "HTTP/1.1 "STATUS"\r\nConnection: close\r\nContent-Type: "TYPE"\r\n\r\n"
-#define HTML_HDR HTTP_HDR("200", "text/html")"<!doctype html>\r\n<html><link rel=icon href=\"data:;base64,iVBORw0KGgo=\">"
+#define HTML_HDR HTTP_HDR("200 OK", "text/html")"<!doctype html>\r\n<html><link rel=icon href=\"data:;base64,iVBORw0KGgo=\">"
+#define TEXT_HDR HTTP_HDR("200 OK", "text/plain")
 #define $(val) val,sizeof(val)/sizeof(*val)
 
 typedef struct{
 	char*method,*url,*path,*version,**headers,**params,**formdata;
 }Request;
+
+void* toJpg(SceUID*scrJpgMem, void*rgba_buf, int realwidth, int width, int height, int*outsize){
+	char ctx[0x200];//sceJpegEncoderGetContextSize()=384
+	SceJpegEncoderContext encCtx = &ctx;
+	void* cbcr_buf, *jpeg_buf;
+	int cbcr_size = CEIL(width * height * 2, 256); // 4:2:0=>(6*w*h)/4 // 4:2:2=>(w*h*8)/4
+	int jpeg_size = CEIL(width * height, 256);
+	int bloc_size = CEIL(cbcr_size + jpeg_size, 256 * 1024);
+	int ret, format = SCE_JPEGENC_PIXELFORMAT_YCBCR420 | SCE_JPEGENC_PIXELFORMAT_CSC_ARGB_YCBCR;
+	if(*scrJpgMem){
+		sceJpegEncoderEnd(encCtx);
+		sceKernelFreeMemBlock(*scrJpgMem);
+		*scrJpgMem = 0;
+	}
+	if (!*scrJpgMem) {
+		*scrJpgMem = sceKernelAllocMemBlock("scrJpgMem", SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW, bloc_size, NULL);
+		sceKernelGetMemBlockBase(*scrJpgMem, &cbcr_buf);
+		jpeg_buf = cbcr_buf + cbcr_size;
+		if(sceJpegEncoderInit(encCtx, width, height, format, jpeg_buf, jpeg_size))return NULL;
+		if(sceJpegEncoderSetOutputAddr(encCtx, jpeg_buf, jpeg_size))return NULL;
+	}
+	//sceJpegEncoderSetHeaderMode(encCtx,strtol(valueof(req.params,"mode"),NULL,0));
+	//sceJpegEncoderSetCompressionRatio(encCtx, strtol(valueof(req.params,"ratio"),NULL,0));
+	if(sceJpegEncoderCsc(encCtx, cbcr_buf, rgba_buf, realwidth, SCE_JPEGENC_PIXELFORMAT_ARGB8888))return NULL;
+	if((*outsize=sceJpegEncoderEncode(encCtx, cbcr_buf))<0)return NULL;
+	return jpeg_buf;
+}
 
 char* base64(unsigned char*in, size_t len, char*out){
 	char*enc = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";

@@ -12,10 +12,10 @@ void module_get(int s, Request req) {
 		"<input name=action type=submit value=Unload>"
 		"<input name=action type=submit value=StopUnload>"
 	"<pre>"})));
-	else sendall(s, $(((char*[]){ HTTP_HDR("200","text/plain") })));
+	else sendall(s, $(((char*[]){ TEXT_HDR })));
 
 	#define FMT_HTML "<input type=radio name=modid value=0x%08lX>0x%08lX %08lX %-16s <a href=\"/file/%s\">%s</a>\n"
-	#define FMT_TXT  "%.lu%#08lx %08lX %-16s %s\n"
+	#define FMT_TXT  "%.lu%#08lx %08lX %-18s %s\n"
 	char line[1024];
 #ifdef __vita__
 	SceUID modids[32];
@@ -37,7 +37,8 @@ void module_get(int s, Request req) {
 } 
 void module_post(int s, Request req) {
 	int ret = -1, status = 0;
-	char*action = valueof(req.formdata,"action");
+	char*o = valueof(req.formdata,"o");//alias fot action (alow us to curl -do=Load)
+	char*action = *o ? o : valueof(req.formdata,"action");
 	int modid = strtol(valueof(req.formdata,"modid")?:"0",NULL,0);
 	int flags = strtol(valueof(req.formdata,"flags")?:"0x01010000",NULL,0);
 	char*fpath = unescape(valueof(req.formdata,"path"));

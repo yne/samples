@@ -7,32 +7,6 @@
 TODO: use YCBCR420 isntead of RGBA8888 on camera to (maybe) avoid jpeg csc
 */
 SceUID camMem[CAMERA_TOTAL], camJpgMem;
-void* cameraEncode(void*rgba_buf, int realwidth, int width, int height, int*outsize){
-	char ctx[0x200];//sceJpegEncoderGetContextSize()=384
-	SceJpegEncoderContext encCtx = &ctx;
-	void* cbcr_buf, *jpeg_buf;
-	int cbcr_size = CEIL(width * height * 2, 256); // 4:2:0=>(6*w*h)/4 // 4:2:2=>(w*h*8)/4
-	int jpeg_size = CEIL(width * height, 256);
-	int bloc_size = CEIL(cbcr_size + jpeg_size, 256 * 1024);
-	int ret, format = SCE_JPEGENC_PIXELFORMAT_YCBCR420 | SCE_JPEGENC_PIXELFORMAT_CSC_ARGB_YCBCR;
-	if(camJpgMem){
-		sceJpegEncoderEnd(encCtx);
-		sceKernelFreeMemBlock(camJpgMem);
-		camJpgMem = 0;
-	}
-	if (!camJpgMem) {
-		camJpgMem = sceKernelAllocMemBlock("camJpgMem", SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW, bloc_size, NULL);
-		sceKernelGetMemBlockBase(camJpgMem, &cbcr_buf);
-		jpeg_buf = cbcr_buf + cbcr_size;
-		if(sceJpegEncoderInit(encCtx, width, height, format, jpeg_buf, jpeg_size))return NULL;
-		if(sceJpegEncoderSetOutputAddr(encCtx, jpeg_buf, jpeg_size))return NULL;
-	}
-	//sceJpegEncoderSetCompressionRatio(encCtx, 250);
-
-	if(sceJpegEncoderCsc(encCtx, cbcr_buf, rgba_buf, realwidth, SCE_JPEGENC_PIXELFORMAT_ARGB8888))return NULL;
-	if((*outsize=sceJpegEncoderEncode(encCtx, cbcr_buf))<0)return NULL;
-	return jpeg_buf;
-}
 void camera_get(int s, Request req) {
 	if (!strcmp(req.path,"/")) {
 		sendall(s, $(((char*[]){HTML_HDR "<img src=1.mjpg><form method=POST>" FOREACH_PARAMS(GENERATE_FORM) "<input type=submit></form>"})));
@@ -63,7 +37,7 @@ void camera_get(int s, Request req) {
 	sendall(s, $(((char*[]){"HTTP/1.1 200 OK\r\nContent-Type: ", mjpg?"multipart/x-mixed-replace; boundary=myboundary":"image/jpeg", "\r\n\r\n"})));
 	for(int size, nb = 0; ;nb++) {
 		sceCameraRead(device, &(SceCameraRead){sizeof(SceCameraRead),0});
-		void*buf = cameraEncode(camBase[device], reso[0], reso[0], reso[1], &size);
+		void*buf = toJpg(&camJpgMem, camBase[device], reso[0], reso[0], reso[1], &size);
 		char size_s[8]; snprintf($(size_s),"%i",size);
 		if(mjpg)
 			sendall(s, $(((char*[]){nb?"\r\n":"", "--myboundary\r\n" "Content-Type: image/jpeg\r\n" "Content-Length: ",size_s,"\r\n\r\n"})));

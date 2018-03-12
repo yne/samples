@@ -20,12 +20,13 @@
 #define exit    sceKernelExitDeleteThread
 #define rmdir   sceIoRmdir
 #define pthread_create(thid, opt, func, argp) sceKernelStartThread(sceKernelCreateThread(__func__,func##_vita,0x10000100,0x10000,0,0,NULL), sizeof(argp), argp)
-static int heartBeatThread(SceSize args, void *argp) {
+static int coffeeThread(SceSize args, void *argp) {
 	sceShellUtilLock(SCE_SHELL_UTIL_LOCK_TYPE_PS_BTN);
-	//scePowerRequestDisplayOff();
 	for(;;){
-		sceKernelPowerTick(SCE_KERNEL_POWER_TICK_DISABLE_AUTO_SUSPEND);
 		sceKernelDelayThread(9 * 1000 * 1000);
+		sceKernelPowerTick(SCE_KERNEL_POWER_TICK_DEFAULT);
+		sceKernelPowerTick(SCE_KERNEL_POWER_TICK_DISABLE_OLED_OFF);
+		sceKernelPowerTick(SCE_KERNEL_POWER_TICK_DISABLE_AUTO_SUSPEND);
 	}
 	return 0;
 }
@@ -36,6 +37,7 @@ static int heartBeatThread(SceSize args, void *argp) {
 #include "httpd.module.c"
 #include "httpd.camera.c"
 #include "httpd.screen.c"
+#include "httpd.ctrl.c"
 #include "httpd.tty.c"
 
 static int alive = 1;
@@ -58,6 +60,8 @@ struct{char*module,*export;void (*handler)(int,Request);} routes[64]= {
 	{"/camera/","POST",camera_post},
 	{"/screen/","GET", screen_get },
 	{"/screen/","POST",screen_post},
+	{"/ctrl/",  "GET", ctrl_get   },
+	{"/ctrl/",  "POST",ctrl_post  },
 	{"/tty/",   "GET", tty_get    },
 	{"/tty/",   "POST",tty_post   },
 };
@@ -65,13 +69,13 @@ struct{char*module,*export;void (*handler)(int,Request);} routes[64]= {
 void route404(int s, Request req){
 	sendall(s, $(((char*[]){HTTP_HDR("404","text/plain"), req.url, " Not Found"})));
 }
-void add_slash(int s, Request req){
+void redirect_slash(int s, Request req){
 	sendall(s, $(((char*[]){"HTTP/1.1 301\r\nLocation: ",req.url, "/\r\n\r\n"})));
 }
 void route_list(int s, Request req){
 	/* TODO: dynamic fetch of all running modules that have the 'http_$meth' export and print them */
 	int h = !!strstr(valueof(req.headers, "Accept"), "html");
-	sendall(s, $(((char*[]){ h ? HTML_HDR "<body><ul>" : HTTP_HDR("200","text/plain")})));
+	sendall(s, $(((char*[]){ h ? HTML_HDR "<body><ul>" : TEXT_HDR})));
 	for (int i = 0; routes[i].module; i++) {
 		char* tag = strcmp("GET",routes[i].export) ? "u" : "a";
 		if(h)sendall(s, $(((char*[]){"<li><",tag," href='",routes[i].module,"'>", routes[i].module,"</",tag,"> <kbd>",routes[i].export,"</kbd></li>\n"})));
@@ -83,7 +87,7 @@ void (*route(char*url, char*meth))(int s, Request req){
 	if(strlen(url) <= 1) // empty path
 		return route_list;
 	if(!strchr(url + 1,'/')) // no terminating / for module
-		return add_slash;
+		return redirect_slash;
 	for(int i = 0; routes[i].module; i++)
 		if(!memcmp(url,routes[i].module,strlen(routes[i].module)) && !strcmp(meth,routes[i].export))
 			return routes[i].handler;/* return the $module that have the 'http_$meth' export*/
@@ -113,7 +117,7 @@ int main(int argc, char*argv[]) {
 	static char net_mem[1*1024*1024];
 	sceSysmoduleLoadModule(SCE_SYSMODULE_NET);
 	sceNetInit(&(SceNetInitParam){net_mem, sizeof(net_mem)});
-	//sceKernelStartThread(sceKernelCreateThread("HBT", heartBeatThread, 0x10000100, 0x40000, 0, 0, NULL), 0, NULL);
+	sceKernelStartThread(sceKernelCreateThread("coffee", coffeeThread, 0x10000100, 0x40000, 0, 0, NULL), 0, NULL);
 #endif
 	int out, in = socket(AF_INET, SOCK_STREAM, 0), port = argc>1?atoi(argv[1]):PORT;
 	setsockopt(in, SOL_SOCKET, SO_REUSEPORT, &(int[]){1}, sizeof(int));

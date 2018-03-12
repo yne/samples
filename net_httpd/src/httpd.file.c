@@ -39,7 +39,7 @@ void file_get(int s, Request req) {
 			"<input type=submit name=action value=Rmdir>"
 			"<input type=submit name=action value=Truncate><input name=size placeholder=size type=number>"
 			"<input type=submit name=action value=Rename><input name=name placeholder=name><pre>\n"})));
-		else sendall(s, $(((char*[]){ HTTP_HDR("200","text/plain") })));
+		else sendall(s, $(((char*[]){ TEXT_HDR })));
 		for(struct dirent*ent;(ent = readdir(dirp));)
 //			if(ent->d_name[0]!='.')
 				h?sendall(s, $(((char*[]){ "<input type=radio name=file value=\"",ent->d_name,"\"><a href=\"",ent->d_name,ENT_IS_A_DIR(ent)?"/":"","\">",ent->d_name,ENT_IS_A_DIR(ent)?"/":"","</a>","\n"}))):sendall(s, $(((char*[]){ ent->d_name,ENT_IS_A_DIR(ent)?"/":"","\n"})));
@@ -85,6 +85,6 @@ void file_post(int s, Request req) {
 	}
 	int h = !!strstr(valueof(req.headers, "Accept"), "html");
 	if(h)file_get(s, req);
-	else sendall(s, $(((char*[]){ ret<0?HTTP_HDR("500","text/plain"):HTTP_HDR("200","text/plain")})));
+	else sendall(s, $(((char*[]){ ret<0?HTTP_HDR("500","text/plain"):TEXT_HDR})));
 
 }
